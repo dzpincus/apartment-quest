@@ -46,6 +46,14 @@ export const STATUS_LABELS = {
   lost: "Lost",
 } as const;
 
+export const INTERACTION_KIND_LABELS = {
+  call: "Call",
+  text: "Text",
+  email: "Email",
+  tour: "Tour",
+  note: "Note",
+} as const;
+
 /** Address as people say it: "214 Grand St #4B". */
 export function listingLabel(
   address: string | null | undefined,

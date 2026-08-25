@@ -15,10 +15,6 @@
  *   so baking it into the string would double it up.
  *
  * Later phases add their verbs here and nowhere else:
- * - Phase 3: `logInteraction` (logged_interaction), `setNextAction`
- *   (set_next_action) — both also bump `listings.last_contacted_at` /
- *   `next_action*`, which is exactly why those columns are excluded from the
- *   `edited_listing` diff below.
  * - Phase 4: `postMessage` (messaged) + thread read markers.
  * - Phase 5: `castVote` (voted).
  * - Phase 6 (if ever): `setDocumentStatus` (updated_document).
@@ -29,10 +25,14 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/queries";
 import { listingLabel, STATUS_LABELS } from "@/lib/format";
+import { fmtDay } from "@/lib/time";
 import type {
   ActivityVerb,
   Broker,
+  DateOnly,
   EntityType,
+  Interaction,
+  InteractionKind,
   Listing,
   ListingStatus,
   NewBroker,
@@ -182,14 +182,27 @@ export async function updateListing(
   return listing;
 }
 
+/** Nulls the whole follow-up triple. Shared by "passed/lost" and Clear. */
+const NO_NEXT_ACTION = {
+  next_action: null,
+  next_action_due: null,
+  next_action_owner: null,
+} as const;
+
 export async function setListingStatus(
   personId: Uuid,
   listing: Pick<Listing, "id" | "address" | "unit" | "status">,
   status: ListingStatus,
 ): Promise<Listing> {
+  // A dead listing must leave the follow-up queue, or the queue fills with
+  // things nobody intends to chase (SPEC: buckets are keyed off next_action_due).
+  const patch =
+    status === "passed" || status === "lost"
+      ? { status, ...NO_NEXT_ACTION }
+      : { status };
   const { data, error } = await createClient()
     .from("listings")
-    .update({ status })
+    .update(patch)
     .eq("id", listing.id)
     .select("*")
     .single();
@@ -262,6 +275,127 @@ export async function mergeIntoExisting(
     summary: `merged a duplicate of ${listingLabel(listing.address, listing.unit)}`,
   });
   return listing;
+}
+
+// -- follow-up ---------------------------------------------------------------
+
+/**
+ * Verb phrases for the feed, one per interaction kind. "called broker about X"
+ * rather than "logged a call on X": the feed reads as a sentence.
+ */
+const INTERACTION_SUMMARY: Record<InteractionKind, (label: string) => string> = {
+  call: (l) => `called broker about ${l}`,
+  text: (l) => `texted about ${l}`,
+  email: (l) => `emailed about ${l}`,
+  tour: (l) => `toured ${l}`,
+  note: (l) => `noted on ${l}`,
+};
+
+/**
+ * One contact: the `interactions` row, the `last_contacted_at` bump that makes
+ * the cold bucket work, and — if the listing was still merely `saved` — the
+ * automatic move to `contacted`.
+ *
+ * That implicit status bump deliberately does *not* write a second
+ * `changed_status` row: one contact is one impression, and "called broker about
+ * X" followed by "moved X to Contacted" would just be the same event twice.
+ */
+export async function logInteraction(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit" | "status">,
+  input: { kind: InteractionKind; notes?: string | null },
+): Promise<Interaction> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("interactions")
+    .insert({
+      listing_id: listing.id,
+      person_id: personId,
+      kind: input.kind,
+      notes: input.notes?.trim() || null,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const patch: { last_contacted_at: string; status?: ListingStatus } = {
+    last_contacted_at: new Date().toISOString(),
+  };
+  if ((listing.status ?? "saved") === "saved") patch.status = "contacted";
+  const { error: bumpError } = await supabase
+    .from("listings")
+    .update(patch)
+    .eq("id", listing.id);
+  if (bumpError) throw bumpError;
+
+  await logActivity({
+    personId,
+    verb: "logged_interaction",
+    entityType: "listing",
+    entityId: listing.id,
+    summary: INTERACTION_SUMMARY[input.kind](listingLabel(listing.address, listing.unit)),
+  });
+  return data as Interaction;
+}
+
+/**
+ * The forced follow-up. `ownerName` is passed in rather than looked up because
+ * the summary is rendered at insert time and must survive later renames of
+ * nothing at all — it is a snapshot of what was decided.
+ */
+export async function setNextAction(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit">,
+  input: {
+    nextAction: string;
+    dueDate: DateOnly;
+    ownerId: Uuid | null;
+    ownerName?: string | null;
+  },
+): Promise<Listing> {
+  const nextAction = input.nextAction.trim();
+  const { data, error } = await createClient()
+    .from("listings")
+    .update({
+      next_action: nextAction,
+      next_action_due: input.dueDate,
+      next_action_owner: input.ownerId,
+    })
+    .eq("id", listing.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const who = input.ownerName ? `, ${input.ownerName}` : "";
+  await logActivity({
+    personId,
+    verb: "set_next_action",
+    entityType: "listing",
+    entityId: listing.id,
+    summary: `set next action on ${listingLabel(listing.address, listing.unit)}: ${nextAction} (due ${fmtDay(input.dueDate)}${who})`,
+  });
+  return data as Listing;
+}
+
+export async function clearNextAction(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit">,
+): Promise<Listing> {
+  const { data, error } = await createClient()
+    .from("listings")
+    .update(NO_NEXT_ACTION)
+    .eq("id", listing.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  await logActivity({
+    personId,
+    verb: "set_next_action",
+    entityType: "listing",
+    entityId: listing.id,
+    summary: `cleared next action on ${listingLabel(listing.address, listing.unit)}`,
+  });
+  return data as Listing;
 }
 
 // -- brokers -----------------------------------------------------------------
@@ -393,6 +527,38 @@ export function useMutations(personId: Uuid | undefined) {
     onError: onError("Could not merge into the existing listing"),
   });
 
+  const logContact = useMutation({
+    mutationFn: (vars: {
+      listing: Pick<Listing, "id" | "address" | "unit" | "status">;
+      kind: InteractionKind;
+      notes?: string | null;
+    }) => logInteraction(requirePerson(), vars.listing, vars),
+    onSuccess: (_interaction, vars) => {
+      invalidateListings(vars.listing.id);
+      void qc.invalidateQueries({ queryKey: queryKeys.interactions(vars.listing.id) });
+    },
+    onError: onError("Could not log the contact"),
+  });
+
+  const nextAction = useMutation({
+    mutationFn: (vars: {
+      listing: Pick<Listing, "id" | "address" | "unit">;
+      nextAction: string;
+      dueDate: DateOnly;
+      ownerId: Uuid | null;
+      ownerName?: string | null;
+    }) => setNextAction(requirePerson(), vars.listing, vars),
+    onSuccess: (listing) => invalidateListings(listing.id),
+    onError: onError("Could not save the next action"),
+  });
+
+  const dropNextAction = useMutation({
+    mutationFn: (listing: Pick<Listing, "id" | "address" | "unit">) =>
+      clearNextAction(requirePerson(), listing),
+    onSuccess: (listing) => invalidateListings(listing.id),
+    onError: onError("Could not clear the next action"),
+  });
+
   const addBroker = useMutation({
     mutationFn: (input: Omit<NewBroker, "id">) => createBroker(requirePerson(), input),
     onSuccess: () => {
@@ -438,6 +604,9 @@ export function useMutations(personId: Uuid | undefined) {
     setListingStatus: status,
     mergeListings: merge,
     mergeIntoExisting: mergeInto,
+    logInteraction: logContact,
+    setNextAction: nextAction,
+    clearNextAction: dropNextAction,
     createBroker: addBroker,
     updateBroker: editBroker,
     updatePersonName: renamePerson,

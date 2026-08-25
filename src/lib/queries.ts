@@ -9,22 +9,41 @@
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { peopleQueryOptions } from "@/lib/person";
-import type { Broker, Listing, Person, Uuid } from "@/lib/types";
+import type {
+  Activity,
+  Broker,
+  Interaction,
+  Listing,
+  Person,
+  Uuid,
+} from "@/lib/types";
+
+/** The person columns every joined row carries. */
+export type PersonRef = Pick<Person, "id" | "name" | "color">;
 
 /** Broker/person columns joined onto a listing row. */
 export type ListingRow = Listing & {
   broker: Pick<Broker, "id" | "name" | "company" | "phone" | "email" | "notes"> | null;
-  added_by_person: Pick<Person, "id" | "name" | "color"> | null;
+  added_by_person: PersonRef | null;
+  next_action_owner_person: PersonRef | null;
 };
 
+export type ActivityRow = Activity & { person: PersonRef | null };
+
+export type InteractionRow = Interaction & { person: PersonRef | null };
+
 /**
- * `!added_by` is a disambiguating hint: `listings` has two FKs to `people`
- * (`added_by` and `next_action_owner`), so PostgREST needs to be told which.
+ * `!added_by` / `!next_action_owner` are disambiguating hints: `listings` has
+ * two FKs to `people`, so PostgREST needs to be told which one each embed
+ * follows. The owner join is on every listing read rather than a queue-only
+ * select — one extra join against a four-row table is cheaper than a second
+ * cache entry that can disagree with the first.
  */
 const LISTING_SELECT = `
   *,
   broker:brokers(id, name, company, phone, email, notes),
-  added_by_person:people!added_by(id, name, color)
+  added_by_person:people!added_by(id, name, color),
+  next_action_owner_person:people!next_action_owner(id, name, color)
 `;
 
 export const queryKeys = {
@@ -34,6 +53,8 @@ export const queryKeys = {
   listing: (id: Uuid) => ["listings", id] as const,
   listingByDedupeKey: (key: string) => ["listings", "dedupe", key] as const,
   activity: ["activity"] as const,
+  activityFeed: (limit: number) => ["activity", limit] as const,
+  interactions: (listingId: Uuid) => ["interactions", listingId] as const,
 };
 
 export async function fetchPeople(): Promise<Person[]> {
@@ -91,6 +112,28 @@ export async function fetchListingByDedupeKey(
   return (data as unknown as ListingRow) ?? null;
 }
 
+/** Reverse-chronological feed, pre-rendered summaries (SPEC: "Activity tracking"). */
+export async function fetchActivity(limit: number): Promise<ActivityRow[]> {
+  const { data, error } = await createClient()
+    .from("activity")
+    .select("*, person:people!person_id(id, name, color)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as ActivityRow[];
+}
+
+/** One listing's contact history, newest first. */
+export async function fetchInteractions(listingId: Uuid): Promise<InteractionRow[]> {
+  const { data, error } = await createClient()
+    .from("interactions")
+    .select("*, person:people!person_id(id, name, color)")
+    .eq("listing_id", listingId)
+    .order("occurred_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as InteractionRow[];
+}
+
 export function usePeople() {
   return useQuery(peopleQueryOptions());
 }
@@ -106,6 +149,37 @@ export function useListings() {
   return useQuery({
     queryKey: queryKeys.listings,
     queryFn: fetchListings,
+  });
+}
+
+/**
+ * The follow-up queue reads exactly the rows the listings table already has —
+ * same key, same cache entry — and buckets them client-side with
+ * `bucketListings`. Keeping one cache entry means the nav badge, the home
+ * screen and the table can never disagree, and the badge costs no extra
+ * request.
+ */
+export function useQueueListings() {
+  return useQuery({
+    queryKey: queryKeys.listings,
+    queryFn: fetchListings,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useActivity(limit = 50) {
+  return useQuery({
+    queryKey: queryKeys.activityFeed(limit),
+    queryFn: () => fetchActivity(limit),
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useInteractions(listingId: Uuid | undefined) {
+  return useQuery({
+    queryKey: queryKeys.interactions(listingId ?? "none"),
+    queryFn: () => fetchInteractions(listingId as Uuid),
+    enabled: Boolean(listingId),
   });
 }
 

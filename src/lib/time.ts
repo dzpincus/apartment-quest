@@ -27,3 +27,21 @@ export function nowNY(now: Date = new Date()): TZDate {
 export function fmtDay(day: string, pattern = "MMM d"): string {
   return format(new TZDate(`${day}T12:00:00`, NY_TZ), pattern);
 }
+
+/**
+ * Calendar arithmetic on a `yyyy-MM-dd` day. Done in UTC on purpose: no
+ * instant is involved, so a DST change cannot shift the result.
+ */
+export function addDays(day: string, days: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(day);
+  if (!m) return day;
+  const d = new Date(
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days),
+  );
+  return d.toISOString().slice(0, 10);
+}
+
+/** The default due date for a forced next action. */
+export function tomorrowNY(now: Date = new Date()): string {
+  return addDays(todayNY(now), 1);
+}

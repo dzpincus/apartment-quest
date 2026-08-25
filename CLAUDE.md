@@ -94,6 +94,23 @@ Production and Preview.
 - **Two gates**: real Supabase auth (guarded server-side in `src/proxy.ts` — Next 16's
   renamed `middleware.ts`) then the person picker. The login email is an internal
   identifier and must never be rendered.
+- **Follow-up queue**: bucketing lives in `src/lib/queue.ts` and is pure —
+  `bucketListings(rows, { todayNY, now })` takes the clock as an argument so the
+  boundaries are testable (`src/lib/queue.test.ts`). Buckets: overdue
+  (`next_action_due < today`), today (`= today`), cold (`status = 'contacted'`,
+  `last_contacted_at` older than 24h, no `next_action`). Merged rows and
+  `passed` / `lost` are excluded, a listing lands in at most one bucket, and any
+  due date at all keeps a listing out of Cold. `setListingStatus` to passed/lost
+  nulls the follow-up triple so dead listings leave the queue. Home and the nav
+  badge share one cache entry (`useQueueListings` reuses `queryKeys.listings`),
+  so the badge costs no extra request.
+- **The next-action prompt is not skippable.** Step 2 of `LogContactDialog` has
+  no close button, ignores Escape and outside clicks (controlled `open` +
+  `disablePointerDismissal`, same trick as the person gate). The only exits are
+  a next action or marking the listing Passed / Lost. SPEC: "If it is skippable,
+  everything rots." `logInteraction` also bumps `last_contacted_at` and moves a
+  still-`saved` listing to `contacted` without writing a second
+  `changed_status` row — one contact is one impression.
 - **Time**: store UTC, render New York. Use `fmtNY` / `todayNY` from `src/lib/time.ts`;
   never `new Date().toLocaleString()` and never compare dates in local time.
 - **Mobile-first**: bottom tab bar under `md`, top bar at `md` and up.

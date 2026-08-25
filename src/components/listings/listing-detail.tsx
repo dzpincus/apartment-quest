@@ -9,6 +9,8 @@ import { InlineEdit, toNumberOrNull, toTextOrNull } from "@/components/inline-ed
 import { SimpleSelect } from "@/components/simple-select";
 import { PersonDot } from "@/components/person-dot";
 import { BrokerCard } from "@/components/listings/broker-card";
+import { InteractionsCard } from "@/components/listings/interactions-card";
+import { NextActionCard } from "@/components/listings/next-action-card";
 import { MergeIntoDialog } from "@/components/listings/merge-into-dialog";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
@@ -265,11 +267,9 @@ function ListingDetailView({
 
       <BrokerCard listing={listing} />
 
-      {/* Phase 3: interactions */}
-      <PlaceholderCard
-        title="Interaction history"
-        note="Calls, emails, tours and the forced next-action prompt arrive in phase 3."
-      />
+      <NextActionCard listing={listing} />
+
+      <InteractionsCard listing={listing} />
 
       {/* Phase 4: thread */}
       <PlaceholderCard

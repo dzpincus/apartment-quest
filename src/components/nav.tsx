@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { usePerson } from "@/lib/person";
+import { useQueue } from "@/components/queue/use-queue";
+import { needsAttentionCount } from "@/lib/queue";
 
 const TABS = [
   { href: "/", label: "Home", icon: Home },
@@ -17,6 +19,21 @@ const TABS = [
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
+}
+
+/** Overdue + today, the only number worth interrupting anyone with. */
+function DueBadge({ count, className }: { count: number; className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-medium tabular-nums text-white",
+        className,
+      )}
+      aria-label={`${count} needing follow-up`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
 }
 
 function LogoutButton({ className }: { className?: string }) {
@@ -41,6 +58,10 @@ function LogoutButton({ className }: { className?: string }) {
 export function Nav() {
   const pathname = usePathname();
   const { person } = usePerson();
+  // Overdue + due today. Reads the shared listings cache, so this costs no
+  // extra request beyond the one the home screen already makes.
+  const { buckets } = useQueue();
+  const due = needsAttentionCount(buckets);
 
   return (
     <>
@@ -53,11 +74,12 @@ export function Nav() {
               key={href}
               href={href}
               className={cn(
-                "rounded-md px-3 py-2 text-sm text-muted-foreground hover:text-foreground",
+                "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-muted-foreground hover:text-foreground",
                 isActive(pathname, href) && "bg-muted font-medium text-foreground",
               )}
             >
               {label}
+              {href === "/" && due > 0 && <DueBadge count={due} />}
             </Link>
           ))}
           <div className="ml-auto flex items-center gap-2">
@@ -99,7 +121,12 @@ export function Nav() {
               isActive(pathname, href) && "text-foreground",
             )}
           >
-            <Icon className="size-5" />
+            <span className="relative">
+              <Icon className="size-5" />
+              {href === "/" && due > 0 && (
+                <DueBadge count={due} className="absolute -top-1.5 -right-2.5" />
+              )}
+            </span>
             {label}
           </Link>
         ))}
