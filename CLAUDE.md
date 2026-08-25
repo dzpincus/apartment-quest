@@ -131,6 +131,21 @@ Production and Preview.
   (only `["unread"]`), which is what keeps an open thread out of a refetch loop.
   `postMessage` marks the thread read for the author. Badges come from the
   `unread_counts` RPC through `useUnread()`, keyed by person.
+- **Votes ride on the listing row.** `LISTING_SELECT` embeds
+  `votes(person_id, vote, comment, updated_at)`, so the table chips, the mobile
+  cards and the detail widget all read votes from a query that already runs —
+  no per-listing vote fetch, no N+1. `useVotes(id)` is `useListing(id)` with a
+  `select`, i.e. the same cache entry. `castVote` / `clearVote` are the app's
+  only optimistic writes (three buttons that wait for a round trip feel broken):
+  `onMutate` patches `listings` *and* `listings/{id}`, `onError` restores the
+  snapshot, `onSettled` invalidates. Summary wording depends on the `prev` vote
+  passed in — "voted yes on X" / "changed vote to maybe on X" / "commented on
+  their vote for X" / "withdrew vote on X" — and a comment blur that changed
+  nothing writes no activity row at all. Pure helpers (counts, the `voteScore`
+  the Votes column sorts by, the "my vote" filter, the cache patches) live in
+  `src/lib/votes.ts` with tests; colours live once in `VOTE_TONE`
+  (`vote-chips.tsx`). Only your own row in `VotesCard` is interactive, which is
+  a guard rail and not a permission — one shared login, no boundary.
 - **Time**: store UTC, render New York. Use `fmtNY` / `todayNY` from `src/lib/time.ts`;
   never `new Date().toLocaleString()` and never compare dates in local time.
 - **Mobile-first**: bottom tab bar under `md`, top bar at `md` and up.

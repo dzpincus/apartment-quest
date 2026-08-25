@@ -18,16 +18,25 @@ import type {
   Person,
   UnreadCount,
   Uuid,
+  Vote,
 } from "@/lib/types";
 
 /** The person columns every joined row carries. */
 export type PersonRef = Pick<Person, "id" | "name" | "color">;
 
-/** Broker/person columns joined onto a listing row. */
+/**
+ * A vote as it arrives embedded in a listing. `listing_id` is left off — it is
+ * the row you found it on — and the person is resolved from `usePerson().people`
+ * rather than joined again for four rows the client already holds.
+ */
+export type VoteRow = Pick<Vote, "person_id" | "vote" | "comment" | "updated_at">;
+
+/** Broker/person columns joined onto a listing row, plus everyone's votes. */
 export type ListingRow = Listing & {
   broker: Pick<Broker, "id" | "name" | "company" | "phone" | "email" | "notes"> | null;
   added_by_person: PersonRef | null;
   next_action_owner_person: PersonRef | null;
+  votes: VoteRow[];
 };
 
 export type ActivityRow = Activity & { person: PersonRef | null };
@@ -55,12 +64,17 @@ export const EMPTY_UNREAD: UnreadSummary = { global: 0, byListing: {}, total: 0 
  * follows. The owner join is on every listing read rather than a queue-only
  * select — one extra join against a four-row table is cheaper than a second
  * cache entry that can disagree with the first.
+ *
+ * Votes are embedded for the same reason: the table's chips, the cards and the
+ * detail widget all want them, and four rows per listing on a query that
+ * already runs is cheaper than one vote query per visible listing.
  */
 const LISTING_SELECT = `
   *,
   broker:brokers(id, name, company, phone, email, notes),
   added_by_person:people!added_by(id, name, color),
-  next_action_owner_person:people!next_action_owner(id, name, color)
+  next_action_owner_person:people!next_action_owner(id, name, color),
+  votes(person_id, vote, comment, updated_at)
 `;
 
 export const queryKeys = {
@@ -79,7 +93,13 @@ export const queryKeys = {
   /** Prefix — the badges are per person, but every write invalidates all of it. */
   unread: ["unread"] as const,
   unreadFor: (personId: Uuid) => ["unread", personId] as const,
-  /** Phase 5 writes these; realtime already invalidates them. */
+  /**
+   * Votes have no cache entry of their own — they ride on the listing row and
+   * `useVotes` reads them from `listing(id)`. The key stays because realtime
+   * invalidates it on any `votes` change; the same handler also invalidates
+   * `listings`, which is a *prefix* of `listing(id)` and so refreshes both the
+   * table and whichever detail page is open.
+   */
   votes: (listingId: Uuid) => ["votes", listingId] as const,
 };
 
@@ -255,6 +275,20 @@ export function useListing(id: Uuid | undefined) {
     queryKey: queryKeys.listing(id ?? "none"),
     queryFn: () => fetchListing(id as Uuid),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * The four votes on one listing. Same key and same fetcher as `useListing` —
+ * `select` runs per observer, so this is a view of that one cache entry, not a
+ * second request. Optimistic writes patch the listing row and both update.
+ */
+export function useVotes(id: Uuid | undefined) {
+  return useQuery({
+    queryKey: queryKeys.listing(id ?? "none"),
+    queryFn: () => fetchListing(id as Uuid),
+    enabled: Boolean(id),
+    select: (listing: ListingRow | null) => listing?.votes ?? [],
   });
 }
 

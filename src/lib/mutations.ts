@@ -15,15 +15,15 @@
  *   so baking it into the string would double it up.
  *
  * Later phases add their verbs here and nowhere else:
- * - Phase 5: `castVote` (voted).
  * - Phase 6 (if ever): `setDocumentStatus` (updated_document).
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { queryKeys } from "@/lib/queries";
+import { queryKeys, type ListingRow, type VoteRow } from "@/lib/queries";
 import { listingLabel, STATUS_LABELS } from "@/lib/format";
+import { upsertVote, withoutVote } from "@/lib/votes";
 import { fmtDay } from "@/lib/time";
 import type {
   ActivityVerb,
@@ -37,6 +37,8 @@ import type {
   Message,
   NewBroker,
   Uuid,
+  Vote,
+  VoteValue,
 } from "@/lib/types";
 
 /** Columns a person can type into. `dedupe_key` is generated; never sent. */
@@ -489,6 +491,110 @@ export async function postMessage(
   return message;
 }
 
+// -- votes -------------------------------------------------------------------
+
+export type CastVoteInput = {
+  /** The address is needed for the pre-rendered summary, so pass the row. */
+  listing: Pick<Listing, "id" | "address" | "unit">;
+  /** `null` keeps the row for its comment without taking a side. */
+  vote: VoteValue | null;
+  comment?: string | null;
+  /**
+   * This person's vote as last read. Used only to word the summary
+   * ("voted yes" vs "changed vote to maybe" vs "commented") and to keep a
+   * no-op blur out of the feed. Pass `undefined` to force an entry.
+   */
+  prev?: Pick<Vote, "vote" | "comment"> | null;
+};
+
+function sameComment(a: string | null | undefined, b: string | null | undefined) {
+  return (a?.trim() || "") === (b?.trim() || "");
+}
+
+/**
+ * The feed line for a vote write, or null when nothing actually changed — a
+ * comment input that blurs untouched must not fill the feed (SPEC: "log
+ * impressions, not observations").
+ */
+export function voteSummary(
+  label: string,
+  vote: VoteValue | null,
+  comment: string | null,
+  prev: Pick<Vote, "vote" | "comment"> | null | undefined,
+): string | null {
+  const before = prev === undefined ? null : (prev?.vote ?? null);
+  const known = prev !== undefined;
+  if (vote !== before) {
+    if (vote === null) return `withdrew vote on ${label}`;
+    return before === null
+      ? `voted ${vote} on ${label}`
+      : `changed vote to ${vote} on ${label}`;
+  }
+  // Same side as before: only a new comment is worth a line.
+  if (known && sameComment(comment, prev?.comment)) return null;
+  return vote === null
+    ? `commented on ${label}`
+    : `commented on their vote for ${label}`;
+}
+
+/** Upsert on (listing_id, person_id) — one vote per person per listing. */
+export async function castVote(personId: Uuid, input: CastVoteInput): Promise<Vote> {
+  const comment = input.comment?.trim() || null;
+  const { data, error } = await createClient()
+    .from("votes")
+    // `updated_at` is left to the default on insert and to the trigger on
+    // update (0003_rpc_triggers.sql), so the clock stays server-side.
+    .upsert(
+      {
+        listing_id: input.listing.id,
+        person_id: personId,
+        vote: input.vote,
+        comment,
+      },
+      { onConflict: "listing_id,person_id" },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const summary = voteSummary(
+    listingLabel(input.listing.address, input.listing.unit),
+    input.vote,
+    comment,
+    input.prev,
+  );
+  if (summary) {
+    await logActivity({
+      personId,
+      verb: "voted",
+      entityType: "listing",
+      entityId: input.listing.id,
+      summary,
+    });
+  }
+  return data as Vote;
+}
+
+/** Withdraw: the row goes, so the widget shows "—" rather than a null vote. */
+export async function clearVote(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit">,
+): Promise<void> {
+  const { error } = await createClient()
+    .from("votes")
+    .delete()
+    .eq("listing_id", listing.id)
+    .eq("person_id", personId);
+  if (error) throw error;
+  await logActivity({
+    personId,
+    verb: "voted",
+    entityType: "listing",
+    entityId: listing.id,
+    summary: `withdrew vote on ${listingLabel(listing.address, listing.unit)}`,
+  });
+}
+
 // -- brokers -----------------------------------------------------------------
 
 export async function createBroker(
@@ -674,6 +780,89 @@ export function useMutations(personId: Uuid | undefined) {
     onError: (error) => console.error("thread read marker failed", error),
   });
 
+  /**
+   * Votes are the one write in the app that must feel instant: three buttons
+   * that wait for a round trip feel broken. Both vote mutations patch the
+   * embedded `votes` array on the listing row *and* on that row inside the
+   * table's list, snapshot what they replaced, put it back on error and
+   * invalidate on settle so the server's copy wins in the end.
+   */
+  type VoteSnapshot = {
+    listing: ListingRow | null | undefined;
+    listings: ListingRow[] | undefined;
+  };
+
+  const patchVotes = (listingId: Uuid, apply: (votes: VoteRow[]) => VoteRow[]) => {
+    const patchRow = (row: ListingRow) =>
+      row.id === listingId ? { ...row, votes: apply(row.votes ?? []) } : row;
+    qc.setQueryData<ListingRow | null>(queryKeys.listing(listingId), (row) =>
+      row ? patchRow(row) : row,
+    );
+    qc.setQueryData<ListingRow[]>(queryKeys.listings, (rows) => rows?.map(patchRow));
+  };
+
+  const startVote = async (
+    listingId: Uuid,
+    apply: (votes: VoteRow[]) => VoteRow[],
+  ): Promise<VoteSnapshot> => {
+    // `["listings"]` is a prefix of `["listings", id]`, so one cancel covers
+    // both the table and the open detail page.
+    await qc.cancelQueries({ queryKey: queryKeys.listings });
+    const snapshot: VoteSnapshot = {
+      listing: qc.getQueryData<ListingRow | null>(queryKeys.listing(listingId)),
+      listings: qc.getQueryData<ListingRow[]>(queryKeys.listings),
+    };
+    patchVotes(listingId, apply);
+    return snapshot;
+  };
+
+  const rollbackVote = (listingId: Uuid, snapshot: VoteSnapshot | undefined) => {
+    if (!snapshot) return;
+    if (snapshot.listing !== undefined) {
+      qc.setQueryData(queryKeys.listing(listingId), snapshot.listing);
+    }
+    if (snapshot.listings !== undefined) {
+      qc.setQueryData(queryKeys.listings, snapshot.listings);
+    }
+  };
+
+  const vote = useMutation<Vote, unknown, CastVoteInput, VoteSnapshot | undefined>({
+    mutationFn: (input) => castVote(requirePerson(), input),
+    onMutate: async (input) => {
+      if (!personId) return undefined;
+      const optimistic: VoteRow = {
+        person_id: personId,
+        vote: input.vote,
+        comment: input.comment?.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      return startVote(input.listing.id, (votes) => upsertVote(votes, optimistic));
+    },
+    onError: (error, input, snapshot) => {
+      rollbackVote(input.listing.id, snapshot);
+      onError("Could not save your vote")(error);
+    },
+    onSettled: (_data, _error, input) => invalidateListings(input.listing.id),
+  });
+
+  const dropVote = useMutation<
+    void,
+    unknown,
+    Pick<Listing, "id" | "address" | "unit">,
+    VoteSnapshot | undefined
+  >({
+    mutationFn: (listing) => clearVote(requirePerson(), listing),
+    onMutate: async (listing) => {
+      if (!personId) return undefined;
+      return startVote(listing.id, (votes) => withoutVote(votes, personId));
+    },
+    onError: (error, listing, snapshot) => {
+      rollbackVote(listing.id, snapshot);
+      onError("Could not clear your vote")(error);
+    },
+    onSettled: (_data, _error, listing) => invalidateListings(listing.id),
+  });
+
   const addBroker = useMutation({
     mutationFn: (input: Omit<NewBroker, "id">) => createBroker(requirePerson(), input),
     onSuccess: () => {
@@ -724,6 +913,8 @@ export function useMutations(personId: Uuid | undefined) {
     clearNextAction: dropNextAction,
     postMessage: sendMessage,
     markThreadRead: readThread,
+    castVote: vote,
+    clearVote: dropVote,
     createBroker: addBroker,
     updateBroker: editBroker,
     updatePersonName: renamePerson,

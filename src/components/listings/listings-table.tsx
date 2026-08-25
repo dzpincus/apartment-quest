@@ -16,10 +16,11 @@ import { PersonDot } from "@/components/person-dot";
 import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
+import { VoteChips } from "@/components/listings/vote-chips";
 import { FEE_OPTIONS } from "@/components/listings/options";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useUnread, type ListingRow } from "@/lib/queries";
-import type { Sort, SortKey } from "@/lib/listing-filters";
+import { defaultSortDir, type Sort, type SortKey } from "@/lib/listing-filters";
 import { money } from "@/lib/format";
 import { fmtDay } from "@/lib/time";
 import type { FeeType } from "@/lib/types";
@@ -31,6 +32,7 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "beds", label: "Bd / Ba" },
   { key: "fee_type", label: "Fee" },
   { key: "status", label: "Status" },
+  { key: "votes", label: "Votes" },
   { key: "broker", label: "Broker" },
   { key: "next_action_due", label: "Next action" },
 ];
@@ -52,7 +54,7 @@ export function ListingsTable({
     onSortChange(
       sort.key === key
         ? { key, dir: sort.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: "asc" },
+        : { key, dir: defaultSortDir(key) },
     );
   }
 
@@ -184,6 +186,10 @@ function Row({
 
       <TableCell>
         <StatusSelect listing={row} className="w-36 border-transparent" />
+      </TableCell>
+
+      <TableCell>
+        <VoteChips votes={row.votes} />
       </TableCell>
 
       <TableCell className="max-w-36 truncate">

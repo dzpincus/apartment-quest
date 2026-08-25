@@ -17,7 +17,7 @@ import {
 } from "@/lib/listing-filters";
 
 export default function ListingsPage() {
-  const { people } = usePerson();
+  const { person, people } = usePerson();
   const { data: listings = [], isPending, error } = useListings();
 
   // Filters are ephemeral view state — no need to survive a reload.
@@ -26,9 +26,10 @@ export default function ListingsPage() {
 
   const incomes = useMemo(() => people.map((p) => p.annual_income), [people]);
   const hoods = useMemo(() => neighborhoods(listings), [listings]);
+  // `person?.id` only matters to the "my vote" filter; everything else ignores it.
   const rows = useMemo(
-    () => sortRows(applyFilters(listings, filters), sort),
-    [listings, filters, sort],
+    () => sortRows(applyFilters(listings, filters, person?.id ?? null), sort),
+    [listings, filters, sort, person?.id],
   );
 
   return (

@@ -16,6 +16,7 @@ import { NextActionCard } from "@/components/listings/next-action-card";
 import { MergeIntoDialog } from "@/components/listings/merge-into-dialog";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
+import { VotesCard } from "@/components/listings/votes-card";
 import {
   FEE_OPTIONS,
   GUARANTOR_OPTIONS,
@@ -288,11 +289,7 @@ function ListingDetailView({
         </CardContent>
       </Card>
 
-      {/* Phase 5: votes */}
-      <PlaceholderCard
-        title="Votes"
-        note="Yes / maybe / no from all four people arrives in phase 5."
-      />
+      <VotesCard listing={listing} />
     </div>
   );
 }
@@ -309,18 +306,5 @@ function DetailField({
       <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className="min-w-0 text-sm">{children}</dd>
     </div>
-  );
-}
-
-function PlaceholderCard({ title, note }: { title: string; note: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">{note}</p>
-      </CardContent>
-    </Card>
   );
 }

@@ -7,6 +7,7 @@ import { PersonDot } from "@/components/person-dot";
 import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
+import { VoteChips } from "@/components/listings/vote-chips";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { FEE_TYPE_LABELS, bedsBaths, listingLabel, money } from "@/lib/format";
 
@@ -44,6 +45,7 @@ export function ListingCards({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <StatusSelect listing={row} className="w-36" />
+            <VoteChips votes={row.votes} />
             <QualifyBadge
               rent={row.rent}
               incomeMultiplier={row.income_multiplier}

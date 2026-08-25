@@ -1,7 +1,8 @@
 /** Pure filter + sort for the listings table. No React. */
 
+import { matchesMyVote, voteScore, type MyVoteFilter } from "@/lib/votes";
 import type { ListingRow } from "@/lib/queries";
-import type { FeeType, ListingStatus } from "@/lib/types";
+import type { FeeType, ListingStatus, Uuid } from "@/lib/types";
 
 export type Filters = {
   rentMin: string;
@@ -10,6 +11,8 @@ export type Filters = {
   neighborhood: string;
   status: ListingStatus | "all";
   feeType: FeeType | "all";
+  /** "How did *I* vote" — resolved against the person on this device. */
+  myVote: MyVoteFilter;
 };
 
 export const EMPTY_FILTERS: Filters = {
@@ -19,6 +22,7 @@ export const EMPTY_FILTERS: Filters = {
   neighborhood: "all",
   status: "all",
   feeType: "all",
+  myVote: "all",
 };
 
 export function hasActiveFilters(f: Filters): boolean {
@@ -28,7 +32,8 @@ export function hasActiveFilters(f: Filters): boolean {
     f.bedsMin !== "" ||
     f.neighborhood !== "all" ||
     f.status !== "all" ||
-    f.feeType !== "all"
+    f.feeType !== "all" ||
+    f.myVote !== "all"
   );
 }
 
@@ -40,17 +45,30 @@ export type SortKey =
   | "fee_type"
   | "status"
   | "broker"
+  | "votes"
   | "next_action_due"
   | "created_at";
 
 export type Sort = { key: SortKey; dir: "asc" | "desc" };
+
+/**
+ * Which way a column sorts on its first click. Alphabetical columns read best
+ * ascending; "most yeses" and "newest" only make sense descending.
+ */
+export function defaultSortDir(key: SortKey): "asc" | "desc" {
+  return key === "votes" || key === "created_at" ? "desc" : "asc";
+}
 
 function num(raw: string): number | null {
   const n = Number(raw);
   return raw.trim() === "" || Number.isNaN(n) ? null : n;
 }
 
-export function applyFilters(rows: ListingRow[], f: Filters): ListingRow[] {
+export function applyFilters(
+  rows: ListingRow[],
+  f: Filters,
+  personId: Uuid | null = null,
+): ListingRow[] {
   const rentMin = num(f.rentMin);
   const rentMax = num(f.rentMax);
   const bedsMin = num(f.bedsMin);
@@ -61,6 +79,7 @@ export function applyFilters(rows: ListingRow[], f: Filters): ListingRow[] {
     if (f.neighborhood !== "all" && (r.neighborhood ?? "") !== f.neighborhood) return false;
     if (f.status !== "all" && r.status !== f.status) return false;
     if (f.feeType !== "all" && (r.fee_type ?? "unknown") !== f.feeType) return false;
+    if (!matchesMyVote(r.votes, personId, f.myVote)) return false;
     return true;
   });
 }
@@ -77,6 +96,9 @@ function sortValue(row: ListingRow, key: SortKey): string | number | null {
       return row.fee_type ?? null;
     case "status":
       return row.status ?? null;
+    case "votes":
+      // One number: yes count first, nos as the tie-break (see `voteScore`).
+      return voteScore(row.votes);
     case "next_action_due":
       return row.next_action_due ?? null;
     case "created_at":

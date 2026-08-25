@@ -11,13 +11,24 @@ import {
   STATUS_FILTER_OPTIONS,
 } from "@/components/listings/options";
 import {
+  defaultSortDir,
   EMPTY_FILTERS,
   hasActiveFilters,
   type Filters,
   type Sort,
   type SortKey,
 } from "@/lib/listing-filters";
+import { VOTE_LABELS, type MyVoteFilter } from "@/lib/votes";
 import type { FeeType, ListingStatus } from "@/lib/types";
+
+/** "My vote" — resolved against the person on this device, not everyone's. */
+const MY_VOTE_OPTIONS: SelectOption<MyVoteFilter>[] = [
+  { value: "all", label: "Any vote" },
+  { value: "yes", label: `My vote: ${VOTE_LABELS.yes}` },
+  { value: "maybe", label: `My vote: ${VOTE_LABELS.maybe}` },
+  { value: "no", label: `My vote: ${VOTE_LABELS.no}` },
+  { value: "none", label: "Not voted" },
+];
 
 const SORT_OPTIONS: SelectOption<SortKey>[] = [
   { value: "created_at", label: "Newest" },
@@ -26,6 +37,7 @@ const SORT_OPTIONS: SelectOption<SortKey>[] = [
   { value: "address", label: "Address" },
   { value: "neighborhood", label: "Neighborhood" },
   { value: "status", label: "Status" },
+  { value: "votes", label: "Most yes" },
   { value: "next_action_due", label: "Next action due" },
 ];
 
@@ -106,11 +118,18 @@ export function ListingsToolbar({
           onValueChange={(v) => set("feeType", v)}
           aria-label="Fee filter"
         />
+        <SimpleSelect<MyVoteFilter>
+          className="w-36"
+          value={filters.myVote}
+          options={MY_VOTE_OPTIONS}
+          onValueChange={(v) => set("myVote", v)}
+          aria-label="My vote filter"
+        />
         <SimpleSelect<SortKey>
           className="w-40 md:hidden"
           value={sort.key}
           options={SORT_OPTIONS}
-          onValueChange={(key) => onSortChange({ ...sort, key })}
+          onValueChange={(key) => onSortChange({ key, dir: defaultSortDir(key) })}
           aria-label="Sort by"
         />
         {hasActiveFilters(filters) && (
