@@ -8,6 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { InlineEdit, toNumberOrNull, toTextOrNull } from "@/components/inline-edit";
 import { SimpleSelect } from "@/components/simple-select";
 import { PersonDot } from "@/components/person-dot";
+import { UnreadBadge } from "@/components/unread-badge";
+import { Thread } from "@/components/chat/thread";
 import { BrokerCard } from "@/components/listings/broker-card";
 import { InteractionsCard } from "@/components/listings/interactions-card";
 import { NextActionCard } from "@/components/listings/next-action-card";
@@ -22,7 +24,7 @@ import {
   type GuarantorChoice,
 } from "@/components/listings/options";
 import { useRowEdit } from "@/components/listings/use-row-edit";
-import { useListing } from "@/lib/queries";
+import { useListing, useUnread } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
 import { listingLabel, money } from "@/lib/format";
 import { fmtDay, fmtNY } from "@/lib/time";
@@ -69,6 +71,7 @@ function ListingDetailView({
 }) {
   const save = useRowEdit(listing);
   const mergedInto = useListing(listing.merged_into ?? undefined);
+  const unread = useUnread();
 
   return (
     <div className="space-y-4">
@@ -95,8 +98,12 @@ function ListingDetailView({
           >
             ← Listings
           </Link>
-          <h1 className="truncate text-xl font-semibold">
-            {listingLabel(listing.address, listing.unit)}
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <span className="truncate">
+              {listingLabel(listing.address, listing.unit)}
+            </span>
+            {/* Clears itself: the thread below marks itself read on mount. */}
+            <UnreadBadge count={unread.byListing[listing.id] ?? 0} />
           </h1>
           <p className="text-sm text-muted-foreground">
             {listing.neighborhood ?? "No neighborhood"} ·{" "}
@@ -271,11 +278,15 @@ function ListingDetailView({
 
       <InteractionsCard listing={listing} />
 
-      {/* Phase 4: thread */}
-      <PlaceholderCard
-        title="Thread"
-        note="This listing's message thread arrives in phase 4."
-      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Thread</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* Bounded: the page keeps scrolling, the thread scrolls inside. */}
+          <Thread listingId={listing.id} className="h-[50vh] min-h-64" />
+        </CardContent>
+      </Card>
 
       {/* Phase 5: votes */}
       <PlaceholderCard

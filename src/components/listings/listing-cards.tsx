@@ -4,9 +4,10 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PersonDot } from "@/components/person-dot";
+import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
-import type { ListingRow } from "@/lib/queries";
+import { useUnread, type ListingRow } from "@/lib/queries";
 import { FEE_TYPE_LABELS, bedsBaths, listingLabel, money } from "@/lib/format";
 
 /** Under `md`: one tappable card per listing, status editable in place. */
@@ -17,14 +18,17 @@ export function ListingCards({
   rows: ListingRow[];
   incomes: ReadonlyArray<number | null | undefined>;
 }) {
+  const unread = useUnread();
+
   return (
     <div className="grid gap-2">
       {rows.map((row) => (
         <Card key={row.id} className="gap-2 p-3">
           <Link href={`/listings/${row.id}`} className="flex items-start justify-between gap-2">
             <span className="min-w-0">
-              <span className="block truncate font-medium">
-                {listingLabel(row.address, row.unit)}
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="truncate">{listingLabel(row.address, row.unit)}</span>
+                <UnreadBadge count={unread.byListing[row.id] ?? 0} />
               </span>
               <span className="block truncate text-xs text-muted-foreground">
                 {[row.neighborhood, bedsBaths(row.beds, row.baths), row.trains]

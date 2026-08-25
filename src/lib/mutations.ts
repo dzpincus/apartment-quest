@@ -15,7 +15,6 @@
  *   so baking it into the string would double it up.
  *
  * Later phases add their verbs here and nowhere else:
- * - Phase 4: `postMessage` (messaged) + thread read markers.
  * - Phase 5: `castVote` (voted).
  * - Phase 6 (if ever): `setDocumentStatus` (updated_document).
  */
@@ -35,6 +34,7 @@ import type {
   InteractionKind,
   Listing,
   ListingStatus,
+  Message,
   NewBroker,
   Uuid,
 } from "@/lib/types";
@@ -398,6 +398,97 @@ export async function clearNextAction(
   return data as Listing;
 }
 
+// -- messages ----------------------------------------------------------------
+
+export type PostMessageInput = {
+  /** `null` is the global thread. */
+  listingId: Uuid | null;
+  body: string;
+  /**
+   * Pre-rendered address for the activity summary. Optional: `postMessage`
+   * looks it up if the caller does not have the listing to hand.
+   */
+  label?: string | null;
+};
+
+/** Reading a thread is an observation, not an impression — no activity row. */
+export async function markThreadRead(
+  personId: Uuid,
+  listingId: Uuid | null,
+): Promise<void> {
+  const supabase = createClient();
+  const last_read_at = new Date().toISOString();
+  // The global thread lives in its own table: `thread_reads.listing_id` is part
+  // of the primary key and Postgres will not enforce uniqueness over a null.
+  const { error } =
+    listingId === null
+      ? await supabase
+          .from("global_reads")
+          .upsert({ person_id: personId, last_read_at }, { onConflict: "person_id" })
+      : await supabase.from("thread_reads").upsert(
+          { person_id: personId, listing_id: listingId, last_read_at },
+          { onConflict: "person_id,listing_id" },
+        );
+  if (error) throw error;
+}
+
+/**
+ * Post to the global thread (`listingId: null`) or a listing's thread.
+ *
+ * The activity row points at the *listing* for a per-listing message, so the
+ * feed can link it; a global message has nothing to link to, so it is filed
+ * under the message itself and renders as plain text.
+ *
+ * Posting also marks the thread read for the author: you have obviously seen
+ * your own message, and without this the badge would light up for the sender
+ * on the next `unread_counts` refresh.
+ */
+export async function postMessage(
+  personId: Uuid,
+  input: PostMessageInput,
+): Promise<Message> {
+  const body = input.body.trim();
+  if (!body) throw new Error("Nothing to send");
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("messages")
+    .insert({ listing_id: input.listingId, person_id: personId, body })
+    .select("*")
+    .single();
+  if (error) throw error;
+  const message = data as Message;
+
+  let label = input.label?.trim() || null;
+  if (input.listingId && !label) {
+    const { data: listing } = await supabase
+      .from("listings")
+      .select("address, unit")
+      .eq("id", input.listingId)
+      .maybeSingle();
+    label = listing ? listingLabel(listing.address, listing.unit) : null;
+  }
+
+  await logActivity({
+    personId,
+    verb: "messaged",
+    entityType: input.listingId ? "listing" : "message",
+    entityId: input.listingId ?? message.id,
+    summary: input.listingId
+      ? `messaged about ${label ?? "a listing"}`
+      : "messaged in the group chat",
+  });
+
+  // Best effort: a failed read marker must not fail the send.
+  try {
+    await markThreadRead(personId, input.listingId);
+  } catch (readError) {
+    console.error("thread read marker failed", readError);
+  }
+
+  return message;
+}
+
 // -- brokers -----------------------------------------------------------------
 
 export async function createBroker(
@@ -559,6 +650,30 @@ export function useMutations(personId: Uuid | undefined) {
     onError: onError("Could not clear the next action"),
   });
 
+  const sendMessage = useMutation({
+    mutationFn: (input: PostMessageInput) => postMessage(requirePerson(), input),
+    onSuccess: (_message, input) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.thread(input.listingId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.unread });
+      void qc.invalidateQueries({ queryKey: queryKeys.activity });
+    },
+    onError: onError("Could not send the message"),
+  });
+
+  /**
+   * Fired from an effect whenever a thread is on screen, so it is deliberately
+   * quiet: no toast (nobody can act on "could not mark as read") and no
+   * invalidation of the thread itself — reading changes the badge, not the
+   * messages, and re-fetching here would put every open thread in a loop.
+   */
+  const readThread = useMutation({
+    mutationFn: (listingId: Uuid | null) => markThreadRead(requirePerson(), listingId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.unread });
+    },
+    onError: (error) => console.error("thread read marker failed", error),
+  });
+
   const addBroker = useMutation({
     mutationFn: (input: Omit<NewBroker, "id">) => createBroker(requirePerson(), input),
     onSuccess: () => {
@@ -607,6 +722,8 @@ export function useMutations(personId: Uuid | undefined) {
     logInteraction: logContact,
     setNextAction: nextAction,
     clearNextAction: dropNextAction,
+    postMessage: sendMessage,
+    markThreadRead: readThread,
     createBroker: addBroker,
     updateBroker: editBroker,
     updatePersonName: renamePerson,

@@ -13,11 +13,12 @@ import {
 import { InlineEdit, toNumberOrNull, toTextOrNull } from "@/components/inline-edit";
 import { SimpleSelect } from "@/components/simple-select";
 import { PersonDot } from "@/components/person-dot";
+import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { FEE_OPTIONS } from "@/components/listings/options";
 import { useRowEdit } from "@/components/listings/use-row-edit";
-import type { ListingRow } from "@/lib/queries";
+import { useUnread, type ListingRow } from "@/lib/queries";
 import type { Sort, SortKey } from "@/lib/listing-filters";
 import { money } from "@/lib/format";
 import { fmtDay } from "@/lib/time";
@@ -45,6 +46,8 @@ export function ListingsTable({
   sort: Sort;
   onSortChange: (sort: Sort) => void;
 }) {
+  const unread = useUnread();
+
   function toggle(key: SortKey) {
     onSortChange(
       sort.key === key
@@ -80,7 +83,12 @@ export function ListingsTable({
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <Row key={row.id} row={row} incomes={incomes} />
+          <Row
+            key={row.id}
+            row={row}
+            incomes={incomes}
+            unread={unread.byListing[row.id] ?? 0}
+          />
         ))}
       </TableBody>
     </Table>
@@ -90,21 +98,26 @@ export function ListingsTable({
 function Row({
   row,
   incomes,
+  unread,
 }: {
   row: ListingRow;
   incomes: ReadonlyArray<number | null | undefined>;
+  unread: number;
 }) {
   const save = useRowEdit(row);
 
   return (
     <TableRow>
       <TableCell className="max-w-56">
-        <Link
-          href={`/listings/${row.id}`}
-          className="font-medium underline-offset-4 hover:underline"
-        >
-          {row.address}
-        </Link>
+        <span className="flex items-center gap-1.5">
+          <Link
+            href={`/listings/${row.id}`}
+            className="truncate font-medium underline-offset-4 hover:underline"
+          >
+            {row.address}
+          </Link>
+          <UnreadBadge count={unread} />
+        </span>
         <InlineEdit
           label="unit"
           value={row.unit}

@@ -111,6 +111,26 @@ Production and Preview.
   everything rots." `logInteraction` also bumps `last_contacted_at` and moves a
   still-`saved` listing to `contacted` without writing a second
   `changed_status` row — one contact is one impression.
+- **Realtime is invalidation only.** `RealtimeProvider` (`src/lib/realtime.tsx`) is
+  mounted once in `(app)/layout.tsx` inside the QueryClientProvider and opens a
+  single channel (`app`) listening to `postgres_changes` on messages, listings,
+  votes, activity and interactions. Payload rows decide *which* query key to
+  invalidate and are never written into the cache — realtime payloads are flat
+  table rows, so putting one in a cache entry would drop the embedded `person` /
+  `broker` joins. Invalidations are debounced 150ms so a burst of related rows
+  (a message plus its activity row) costs one refetch. No manual
+  `supabase.realtime.setAuth()`: `createBrowserClient` gives realtime-js an
+  `accessToken` callback that it calls on connect and before each subscribe, so
+  the socket already carries the session JWT for the per-subscriber RLS check.
+  `setAuth` would only be needed for private Broadcast/Presence channels.
+- **Threads**: `<Thread listingId={null} />` is the global chat, `listingId={id}`
+  a listing's. Reading is an observation, not an impression, so `markThreadRead`
+  writes `thread_reads` / `global_reads` and *no* activity row, and it only fires
+  while `document.visibilityState === "visible"` — a background tab must not
+  clear a badge nobody saw. It also does not invalidate the thread it just read
+  (only `["unread"]`), which is what keeps an open thread out of a refetch loop.
+  `postMessage` marks the thread read for the author. Badges come from the
+  `unread_counts` RPC through `useUnread()`, keyed by person.
 - **Time**: store UTC, render New York. Use `fmtNY` / `todayNY` from `src/lib/time.ts`;
   never `new Date().toLocaleString()` and never compare dates in local time.
 - **Mobile-first**: bottom tab bar under `md`, top bar at `md` and up.

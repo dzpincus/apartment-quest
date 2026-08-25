@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { usePerson } from "@/lib/person";
 import { useQueue } from "@/components/queue/use-queue";
 import { needsAttentionCount } from "@/lib/queue";
+import { useUnread } from "@/lib/queries";
+import { UnreadBadge } from "@/components/unread-badge";
 
 const TABS = [
   { href: "/", label: "Home", icon: Home },
@@ -62,6 +64,8 @@ export function Nav() {
   // extra request beyond the one the home screen already makes.
   const { buckets } = useQueue();
   const due = needsAttentionCount(buckets);
+  // Only the global thread: per-listing unreads live next to their listing.
+  const unreadChat = useUnread().global;
 
   return (
     <>
@@ -80,6 +84,7 @@ export function Nav() {
             >
               {label}
               {href === "/" && due > 0 && <DueBadge count={due} />}
+              {href === "/chat" && <UnreadBadge count={unreadChat} />}
             </Link>
           ))}
           <div className="ml-auto flex items-center gap-2">
@@ -125,6 +130,12 @@ export function Nav() {
               <Icon className="size-5" />
               {href === "/" && due > 0 && (
                 <DueBadge count={due} className="absolute -top-1.5 -right-2.5" />
+              )}
+              {href === "/chat" && (
+                <UnreadBadge
+                  count={unreadChat}
+                  className="absolute -top-1.5 -right-2.5"
+                />
               )}
             </span>
             {label}

@@ -8,13 +8,15 @@
 
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
-import { peopleQueryOptions } from "@/lib/person";
+import { peopleQueryOptions, usePerson } from "@/lib/person";
 import type {
   Activity,
   Broker,
   Interaction,
   Listing,
+  Message,
   Person,
+  UnreadCount,
   Uuid,
 } from "@/lib/types";
 
@@ -31,6 +33,21 @@ export type ListingRow = Listing & {
 export type ActivityRow = Activity & { person: PersonRef | null };
 
 export type InteractionRow = Interaction & { person: PersonRef | null };
+
+export type MessageRow = Message & { person: PersonRef | null };
+
+/**
+ * `unread_counts` flattened for the badges: the global thread, a per-listing
+ * map, and the sum. One RPC feeds the nav badge, the listings table and the
+ * listing detail heading.
+ */
+export type UnreadSummary = {
+  global: number;
+  byListing: Record<Uuid, number>;
+  total: number;
+};
+
+export const EMPTY_UNREAD: UnreadSummary = { global: 0, byListing: {}, total: 0 };
 
 /**
  * `!added_by` / `!next_action_owner` are disambiguating hints: `listings` has
@@ -55,7 +72,19 @@ export const queryKeys = {
   activity: ["activity"] as const,
   activityFeed: (limit: number) => ["activity", limit] as const,
   interactions: (listingId: Uuid) => ["interactions", listingId] as const,
+  /** Prefix — invalidate to refresh every thread at once. */
+  messages: ["messages"] as const,
+  /** One thread. `null` is the global thread, stored under `"global"`. */
+  thread: (listingId: Uuid | null) => ["messages", listingId ?? "global"] as const,
+  /** Prefix — the badges are per person, but every write invalidates all of it. */
+  unread: ["unread"] as const,
+  unreadFor: (personId: Uuid) => ["unread", personId] as const,
+  /** Phase 5 writes these; realtime already invalidates them. */
+  votes: (listingId: Uuid) => ["votes", listingId] as const,
 };
+
+/** How much scrollback a thread keeps. Four people, a few weeks — plenty. */
+export const THREAD_LIMIT = 200;
 
 export async function fetchPeople(): Promise<Person[]> {
   const { data, error } = await createClient()
@@ -134,6 +163,44 @@ export async function fetchInteractions(listingId: Uuid): Promise<InteractionRow
   return (data ?? []) as unknown as InteractionRow[];
 }
 
+/**
+ * One thread, oldest first. `listingId === null` is the global thread — note
+ * `.is("listing_id", null)`, since `.eq(..., null)` is not the same query.
+ *
+ * The *last* `THREAD_LIMIT` messages, so the fetch is newest-first and reversed
+ * here: `ascending: true` with a limit would hand back the oldest 200 and the
+ * thread would freeze on the day it was created.
+ */
+export async function fetchMessages(listingId: Uuid | null): Promise<MessageRow[]> {
+  const base = createClient()
+    .from("messages")
+    .select("*, person:people!person_id(id, name, color)");
+  const scoped =
+    listingId === null ? base.is("listing_id", null) : base.eq("listing_id", listingId);
+  const { data, error } = await scoped
+    .order("created_at", { ascending: false })
+    .limit(THREAD_LIMIT);
+  if (error) throw error;
+  return ((data ?? []) as unknown as MessageRow[]).slice().reverse();
+}
+
+/** Unread badges for every thread in one round trip (`unread_counts` RPC). */
+export async function fetchUnreadCounts(personId: Uuid): Promise<UnreadSummary> {
+  const { data, error } = await createClient().rpc("unread_counts", {
+    p_person: personId,
+  });
+  if (error) throw error;
+  const summary: UnreadSummary = { global: 0, byListing: {}, total: 0 };
+  for (const row of (data ?? []) as UnreadCount[]) {
+    // bigint comes back as a string on some PostgREST versions.
+    const n = Number(row.unread) || 0;
+    if (row.listing_id === null) summary.global += n;
+    else summary.byListing[row.listing_id] = n;
+    summary.total += n;
+  }
+  return summary;
+}
+
 export function usePeople() {
   return useQuery(peopleQueryOptions());
 }
@@ -189,6 +256,40 @@ export function useListing(id: Uuid | undefined) {
     queryFn: () => fetchListing(id as Uuid),
     enabled: Boolean(id),
   });
+}
+
+/**
+ * A thread's messages. Kept fresh by the realtime channel rather than by
+ * polling — `staleTime: 0` so a tab that reconnects picks up what it missed.
+ */
+export function useMessages(listingId: Uuid | null) {
+  return useQuery({
+    queryKey: queryKeys.thread(listingId),
+    queryFn: () => fetchMessages(listingId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Unread counts for the person on this device. Keyed by person so switching
+ * who you are cannot show someone else's badges; every write invalidates the
+ * `["unread"]` prefix, which covers both.
+ */
+export function useUnreadCounts() {
+  const { person } = usePerson();
+  return useQuery({
+    queryKey: queryKeys.unreadFor(person?.id ?? "none"),
+    queryFn: () => fetchUnreadCounts(person!.id),
+    enabled: Boolean(person),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** Badge-friendly view of `useUnreadCounts` — zeros until it loads. */
+export function useUnread(): UnreadSummary {
+  return useUnreadCounts().data ?? EMPTY_UNREAD;
 }
 
 /**
