@@ -69,11 +69,28 @@ Production and Preview.
 
 ## Architectural rules
 
-- **All writes go through `src/lib/mutations.ts`** (phase 2 onward). Every mutation
-  writes its row *and* the matching `activity` row with a pre-rendered `summary`
-  string. No component calls `supabase.from(...).insert/update/delete` directly.
+- **All writes go through `src/lib/mutations.ts`.** Every mutation writes its row
+  *and* the matching `activity` row with a pre-rendered `summary` string. No
+  component calls `supabase.from(...).insert/update/delete` directly. Reads go
+  through `src/lib/queries.ts` (key factory + fetchers + `use*` hooks); later
+  phases add their verbs to `mutations.ts` and nowhere else.
+- **Summaries are verb phrases without the actor's name** ("added 214 Grand St
+  #4B"): the feed prints the person with their colour, so the name would double up.
+  `updateListing` only logs when a meaningful column changed — `updated_at`,
+  `last_contacted_at` and `next_action*` are excluded, since those belong to
+  phase 3's own verbs.
+- **Dedupe**: `dedupeKey(address, unit)` in `src/lib/dedupe.ts` mirrors the
+  Postgres generated column byte for byte
+  (`lower(regexp_replace(address||'|'||unit, '[^a-zA-Z0-9|]', '', 'g'))`). Change
+  one and you must change the other. The add form checks it on blur and again on
+  submit; post-hoc dupes use the `merge_listings` RPC from the detail page.
+- **Qualification math**: `required = rent * income_multiplier` — NYC 40x means
+  combined *annual* income >= 40x *monthly* rent. `SPEC.md` writes
+  `rent * 12 * income_multiplier`, which applies the 40x twice; the convention it
+  cites wins over its own formula. Documented in `qualification()`.
 - **`person_id` comes from `usePerson()`** (`src/lib/person.tsx`), never from a prop
-  drill or a fresh localStorage read. `useRequirePerson()` inside mutations.
+  drill or a fresh localStorage read, and is passed explicitly into every
+  `mutations.ts` call (`useMutations(person?.id)`).
 - **Two gates**: real Supabase auth (guarded server-side in `src/proxy.ts` — Next 16's
   renamed `middleware.ts`) then the person picker. The login email is an internal
   identifier and must never be rendered.

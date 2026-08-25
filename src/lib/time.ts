@@ -18,3 +18,12 @@ export function fmtNY(date: Date | string | number, pattern = "MMM d, h:mma"): s
 export function nowNY(now: Date = new Date()): TZDate {
   return new TZDate(now, NY_TZ);
 }
+
+/**
+ * Render a date-only column (`yyyy-MM-dd`, e.g. `next_action_due`) without
+ * timezone drift — parsing it as an instant would land on the previous day in
+ * New York.
+ */
+export function fmtDay(day: string, pattern = "MMM d"): string {
+  return format(new TZDate(`${day}T12:00:00`, NY_TZ), pattern);
+}

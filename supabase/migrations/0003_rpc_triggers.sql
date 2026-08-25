@@ -111,3 +111,9 @@ begin
   end loop;
 end;
 $$;
+
+-- search_path hardening ------------------------------------------------------
+-- Supabase's linter flags mutable search_path on security-relevant functions.
+alter function set_updated_at() set search_path = public;
+alter function merge_listings(uuid, uuid) set search_path = public;
+alter function unread_counts(uuid) set search_path = public;
