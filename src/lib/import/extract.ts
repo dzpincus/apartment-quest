@@ -13,7 +13,7 @@ import "server-only";
  * Nothing here is trusted. `coerce.ts` re-checks every value.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { APIError } from "@anthropic-ai/sdk";
 import type { RawExtract } from "./coerce";
 
 export const IMPORT_MODEL = "claude-haiku-4-5-20251001";
@@ -52,8 +52,16 @@ export function anthropicClient(): Anthropic {
   return new Anthropic({ apiKey, maxRetries: 1, timeout: 20_000 });
 }
 
-/** Anthropic's own failures, worded for a human. Shared with `classify.ts`. */
+/**
+ * Anthropic's own failures, worded for a human. Shared with `classify.ts`.
+ *
+ * Every path logs first: the sentence a person sees is deliberately short, and
+ * a 400 whose body never reaches the logs ("your credit balance is too low")
+ * is a dead end for whoever has to fix it.
+ */
 export function extractionErrorFor(error: unknown): ExtractionError {
+  logAnthropicFailure(error);
+
   if (error instanceof Anthropic.APIError) {
     if (error.status === 401 || error.status === 403) {
       return new ExtractionError("The Anthropic API key was rejected.");
@@ -61,9 +69,77 @@ export function extractionErrorFor(error: unknown): ExtractionError {
     if (error.status === 429) {
       return new ExtractionError("Rate-limited by Anthropic — try again in a moment.");
     }
+    if (error.status === 400) {
+      const detail = apiMessage(error);
+      // The one 400 that is an account problem rather than a bad request — and
+      // the only one the reader can act on without opening the logs.
+      if (/credit balance is too low/i.test(detail)) {
+        return new ExtractionError(
+          "Anthropic account has no credits — add billing at console.anthropic.com.",
+        );
+      }
+      return new ExtractionError(
+        detail
+          ? `Anthropic rejected the request (400): ${detail}`
+          : "Anthropic rejected the request (400).",
+      );
+    }
     return new ExtractionError(`Anthropic returned ${error.status ?? "an error"}.`);
   }
   return new ExtractionError("Couldn't reach Anthropic.");
+}
+
+/** The API's own sentence: one line, short enough to sit in a toast. */
+function apiMessage(error: APIError): string {
+  const body = error.error as
+    | { message?: unknown; error?: { message?: unknown; type?: unknown } }
+    | undefined;
+  const raw =
+    typeof body?.error?.message === "string"
+      ? body.error.message
+      : typeof body?.message === "string"
+        ? body.message
+        : "";
+  return raw.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function apiErrorType(error: APIError): string | null {
+  const body = error.error as { type?: unknown; error?: { type?: unknown } } | undefined;
+  if (typeof body?.error?.type === "string") return body.error.type;
+  if (typeof body?.type === "string") return body.type;
+  return error.type ?? null;
+}
+
+/** `Headers` in this SDK version, a plain object in older ones. Read either. */
+function requestIdOf(error: APIError): string | null | undefined {
+  if (error.requestID) return error.requestID;
+  const headers = error.headers as
+    | (Headers & Record<string, string | undefined>)
+    | undefined;
+  if (!headers) return null;
+  if (typeof headers.get === "function") return headers.get("request-id");
+  return headers["request-id"] ?? null;
+}
+
+/** Whatever Anthropic actually said, before it is flattened for a person. */
+function logAnthropicFailure(error: unknown): void {
+  if (error instanceof Anthropic.APIError) {
+    console.error("[import] anthropic error", {
+      status: error.status,
+      type: apiErrorType(error),
+      message: error.message?.slice(0, 500),
+      request_id: requestIdOf(error),
+    });
+    return;
+  }
+  const failure = error as { name?: unknown; message?: unknown } | null;
+  console.error("[import] anthropic error", {
+    name: typeof failure?.name === "string" ? failure.name : typeof error,
+    message:
+      typeof failure?.message === "string"
+        ? failure.message.slice(0, 500)
+        : String(error).slice(0, 500),
+  });
 }
 
 const SYSTEM = [

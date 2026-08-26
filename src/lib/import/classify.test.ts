@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   blockedNote,
   classifyFetched,
+  evidencePhrase,
   hostLabel,
   isBlockedNote,
   landedElsewhere,
@@ -181,6 +182,107 @@ describe("classifyFetched — ambiguous is the default, not a guess", () => {
       page({ html: `<html><body><script>var p = "$4,200"; var b = "2 bed";</script></body></html>` }),
     );
     expect(out.state).toBe("ambiguous");
+  });
+});
+
+describe("evidence is a phrase, not a window", () => {
+  /** What Firecrawl actually hands back for a Zillow page that is off market. */
+  const ZILLOW_MD = [
+    "[Skip main navigation](https://www.zillow.com/#main)Home detailsNeighborhood",
+    "",
+    "Off market",
+    "",
+    "See all 12 photos",
+    "",
+    "![1st image of 959 E 79th St APT 1](https://photos.zillowstatic.com/fp/abc-cc_ft_768.jpg)",
+  ].join("\n");
+
+  const zillow = "https://www.zillow.com/homedetails/959-E-79th-St-APT-1/123_zpid/";
+
+  it("quotes the bare phrase when what surrounds it is markup", () => {
+    const out = classifyFetched(
+      page({ finalUrl: zillow, originalUrl: zillow, html: undefined, markdown: ZILLOW_MD }),
+    );
+    expect(out.state).toBe("off_market");
+    expect(out.note).toBe("zillow.com: Off market");
+  });
+
+  it("keeps the sentence when the sentence reads like one", () => {
+    const out = classifyFetched(
+      page({
+        html:
+          "<html><body><p>Note: we regret that this apartment is no longer available" +
+          " as of April and will not return.</p></body></html>",
+      }),
+    );
+    expect(out.note).toBe(
+      "streeteasy.com: we regret that this apartment is no longer available as of April and will not",
+    );
+    // Six words each side, no more: the seventh is left out.
+    expect(out.note).not.toContain("Note:");
+    expect(out.note).not.toContain("return");
+  });
+
+  it("never cuts a word in half", () => {
+    const text = `The management of this building has confirmed that unit 4B ${"absolutely ".repeat(6)}has been rented to another applicant`;
+    const out = classifyFetched(page({ html: `<html><body><p>${text}</p></body></html>` }));
+    const body = out.note.replace("streeteasy.com: ", "");
+    for (const word of body.split(" ")) {
+      expect(text.split(/\s+/)).toContain(word);
+    }
+  });
+
+  it("stays short enough to read", () => {
+    const out = classifyFetched(
+      page({
+        html: `<html><body><p>${"lorem ipsum ".repeat(20)}is no longer available ${"dolor sit ".repeat(20)}</p></body></html>`,
+      }),
+    );
+    expect(out.note.replace("streeteasy.com: ", "").length).toBeLessThanOrEqual(80);
+  });
+
+  it("leaves a removed note exactly as it was", () => {
+    expect(classifyFetched(page({ status: 404 })).note).toBe(
+      "streeteasy.com: page is gone (404)",
+    );
+  });
+});
+
+describe("evidencePhrase — what the model says, cleaned up", () => {
+  it("strips an image out of the middle of a phrase", () => {
+    expect(
+      evidencePhrase(
+        "This home is ![img](https://photos.zillowstatic.com/fp/x.jpg) off market",
+      ),
+    ).toBe("This home is off market");
+  });
+
+  it("keeps a link's words and drops its URL", () => {
+    expect(evidencePhrase("See [our rental terms](https://example.com/terms) — rented")).toBe(
+      "See our rental terms — rented",
+    );
+  });
+
+  it("drops heading hashes, emphasis and backticks, but not a unit number", () => {
+    expect(evidencePhrase("## **214 Grand St #4B** `is` no longer available")).toBe(
+      "214 Grand St #4B is no longer available",
+    );
+  });
+
+  it("drops a bare URL and half an image left by a truncated page", () => {
+    expect(evidencePhrase("Off market ![1st image of 959 E 79th St APT 1](htt")).toBe(
+      "Off market",
+    );
+  });
+
+  it("caps at 80 characters, between words", () => {
+    const out = evidencePhrase("available ".repeat(20));
+    expect(out.length).toBeLessThanOrEqual(80);
+    expect(out.endsWith("available")).toBe(true);
+  });
+
+  it("is empty for markup with nothing to say, and the note copes", () => {
+    expect(evidencePhrase("![img](https://example.com/x.jpg)")).toBe("");
   });
 });
 

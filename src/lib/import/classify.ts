@@ -98,7 +98,7 @@ export function classifyFetched(page: FetchedPage): Classification {
   if (!text.trim()) return { state: "ambiguous", note: note(host, "empty page") };
 
   const gone = OFF_MARKET_RE.exec(text);
-  if (gone) return { state: "off_market", note: note(host, snippet(text, gone.index)) };
+  if (gone) return { state: "off_market", note: note(host, phraseAround(text, gone)) };
 
   if (PRICE_RE.test(text) && BEDS_RE.test(text)) {
     return { state: "active", note: note(host, "price and beds still on the page") };
@@ -165,8 +165,9 @@ const SYSTEM = [
   "  listing. Do not read them as removals.",
   "- Similar apartments, recently rented nearby, and price history sections describe",
   "  OTHER apartments. Judge only the listing the page is about.",
-  "- evidence: the phrase from the page that decided it, under 100 characters, quoted",
-  '  as closely as you can. For "active" say what is still being advertised.',
+  "- evidence: a quoted phrase from the page that decided it, at most 12 words, with no",
+  "  markup — no image or link syntax, no URLs, no stray punctuation. Quote it as closely",
+  '  as you can. For "active" say what is still being advertised.',
 ].join("\n");
 
 const TOOL: Anthropic.Tool = {
@@ -181,7 +182,8 @@ const TOOL: Anthropic.Tool = {
       },
       evidence: {
         type: "string",
-        description: "The phrase from the page that decided it. Under 100 characters.",
+        description:
+          "A quoted phrase from the page that decided it: at most 12 words, no markup.",
       },
     },
     required: ["state", "evidence"],
@@ -243,7 +245,8 @@ export async function classifyWithModel(
   return {
     // Nothing the model says is trusted: an off-schema state is an absence.
     state: toState(input.state),
-    note: note(host, typeof input.evidence === "string" ? input.evidence : "no evidence"),
+    // The model is asked for a bare phrase and sometimes hands back markdown anyway.
+    note: note(host, evidencePhrase(typeof input.evidence === "string" ? input.evidence : "")),
     usage,
   };
 }
@@ -305,10 +308,89 @@ function note(host: string, detail: string): string {
   return (host ? `${host}: ${body}` : body).slice(0, NOTE_CAP);
 }
 
-/** The matched phrase plus a little of what surrounds it, for the note. */
-function snippet(text: string, index: number): string {
-  const start = Math.max(0, index - 30);
-  return text.slice(start, index + 70).replace(/\s+/g, " ").trim();
+/**
+ * Longest phrase we quote as evidence, before the host label goes in front of
+ * it. `NOTE_CAP` is what a table row can hold; this is what a person can read.
+ */
+const EVIDENCE_CAP = 80;
+
+/** How much of what surrounds the matched phrase is worth quoting, in words. */
+const CONTEXT_WORDS = 6;
+
+/**
+ * Context that is page furniture rather than a sentence: leftover markdown
+ * link or image syntax, a URL, or so few letters that whatever we captured was
+ * a nav bar, a price strip or a pile of photo counts.
+ */
+function isJunkContext(context: string): boolean {
+  if (/\]\(|!\[|https?:|www\./i.test(context)) return true;
+  const letters = context.replace(/[^a-z]/gi, "").length;
+  return letters < context.length * 0.4;
+}
+
+/**
+ * Markdown out, whitespace collapsed. Firecrawl hands back a page written in
+ * markdown, and an image between two sentences is `![alt](https://…)` — 200
+ * characters of URL nobody wants to read in an activity feed.
+ */
+export function stripMarkup(raw: string): string {
+  return raw
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ") // images, whole
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // links keep their label
+    .replace(/!\[[^\]]*\](?:\([^)]*)?/g, " ") // an image a window cut in half
+    .replace(/\]\([^)]*\)?/g, " ") // a link a window cut in half
+    .replace(/!\[/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[[\]]/g, " ")
+    .replace(/[*`]+/g, " ")
+    .replace(/#+(?=\s|$)/g, " ") // heading hashes, but not "#4B"
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** `EVIDENCE_CAP` characters at most, cut between words rather than inside one. */
+function capPhrase(text: string): string {
+  if (text.length <= EVIDENCE_CAP) return text;
+  const cut = text.slice(0, EVIDENCE_CAP);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut).replace(/\s+$/, "");
+}
+
+/** A phrase fit to quote: no markup, no half-words, short enough to read. */
+export function evidencePhrase(raw: string): string {
+  return capPhrase(stripMarkup(raw));
+}
+
+/**
+ * The matched phrase, with up to `CONTEXT_WORDS` words either side when those
+ * words are a sentence — and the bare phrase when they are not. A window cut
+ * by character count lands mid-word and mid-URL ("atorHome detailsNeighborhood
+ * Off market … ![1st image of 959 E 79th St](htt"), which is how a correct
+ * verdict ends up looking like a bug.
+ */
+function phraseAround(text: string, match: RegExpExecArray): string {
+  const bare = evidencePhrase(match[0]) || match[0];
+  const before = text.slice(0, match.index);
+  const after = text.slice(match.index + match[0].length);
+  const lead = tailWords(before);
+  const trail = headWords(after);
+  const context = [lead, match[0], trail].filter(Boolean).join(" ");
+  if (isJunkContext(context)) return bare;
+  return evidencePhrase(context) || bare;
+}
+
+/** The last few whole words before the match. A word glued to it is a fragment. */
+function tailWords(before: string): string {
+  const words = before.split(/\s+/).filter(Boolean);
+  if (before && !/\s$/.test(before)) words.pop();
+  return words.slice(-CONTEXT_WORDS).join(" ");
+}
+
+/** The first few whole words after the match, on the same terms. */
+function headWords(after: string): string {
+  const words = after.split(/\s+/).filter(Boolean);
+  if (after && !/^\s/.test(after)) words.shift();
+  return words.slice(0, CONTEXT_WORDS).join(" ");
 }
 
 function trimSlash(path: string): string {
