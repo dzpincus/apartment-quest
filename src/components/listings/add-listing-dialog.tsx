@@ -26,6 +26,7 @@ import { BrokerForm, brokerPayload } from "@/components/brokers/broker-form";
 import {
   FEE_OPTIONS,
   GUARANTOR_OPTIONS,
+  PETS_OPTIONS,
   type GuarantorChoice,
 } from "@/components/listings/options";
 import {
@@ -44,7 +45,7 @@ import {
   useBrokers,
   useListingByDedupeKey,
 } from "@/lib/queries";
-import type { FeeType } from "@/lib/types";
+import type { FeeType, PetsPolicy } from "@/lib/types";
 
 const NEW_BROKER = "__new__";
 
@@ -326,6 +327,33 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
                   aria-label="Guarantor"
                 />
               )}
+            />
+          </Field>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
+          <Field>
+            <FieldLabel htmlFor="pets">Pets</FieldLabel>
+            <Controller
+              control={form.control}
+              name="pets"
+              render={({ field }) => (
+                <SimpleSelect<PetsPolicy>
+                  id="pets"
+                  value={field.value}
+                  options={PETS_OPTIONS}
+                  onValueChange={field.onChange}
+                  aria-label="Pets"
+                />
+              )}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="pet_notes">Pet notes</FieldLabel>
+            <Input
+              id="pet_notes"
+              placeholder="e.g. under 25 lb, $500 deposit"
+              {...form.register("pet_notes")}
             />
           </Field>
         </div>

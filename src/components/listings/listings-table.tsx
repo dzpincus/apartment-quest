@@ -18,6 +18,7 @@ import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { FEE_OPTIONS } from "@/components/listings/options";
+import { PetsMark } from "@/components/listings/pets-mark";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { defaultSortDir, type Sort, type SortKey } from "@/lib/listing-filters";
@@ -31,6 +32,7 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "rent", label: "Rent", className: "text-right" },
   { key: "beds", label: "Bd / Ba" },
   { key: "fee_type", label: "Fee" },
+  { key: "pets", label: "Pets" },
   { key: "status", label: "Status" },
   { key: "votes", label: "Votes" },
   { key: "broker", label: "Broker" },
@@ -192,6 +194,10 @@ function Row({
           options={FEE_OPTIONS}
           onValueChange={(fee_type) => save({ fee_type })}
         />
+      </TableCell>
+
+      <TableCell>
+        <PetsMark pets={row.pets} notes={row.pet_notes} />
       </TableCell>
 
       <TableCell>

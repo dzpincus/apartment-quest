@@ -37,6 +37,8 @@ function row(over: Partial<ListingRow> & { id: string }): ListingRow {
     income_multiplier: 40,
     trains: null,
     notes: null,
+    pets: null,
+    pet_notes: null,
     broker_id: null,
     added_by: null,
     status: "saved",
@@ -72,6 +74,8 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
       { neighborhood: "Bushwick" },
       { status: "contacted" },
       { feeType: "no_fee" },
+      { pets: "yes" },
+      { pets: "unknown" },
       { myVote: "yes" },
       { myVote: "none" },
     ];
@@ -83,7 +87,13 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
   it("does not treat the 'all' sentinels or empty strings as active", () => {
     expect(
       hasActiveFilters(
-        filters({ neighborhood: "all", status: "all", feeType: "all", myVote: "all" }),
+        filters({
+          neighborhood: "all",
+          status: "all",
+          feeType: "all",
+          pets: "all",
+          myVote: "all",
+        }),
       ),
     ).toBe(false);
   });
@@ -209,6 +219,87 @@ describe("applyFilters — neighborhood, status and fee", () => {
     expect(
       applyFilters(rows, filters({ neighborhood: "Bushwick", status: "saved" })),
     ).toEqual([]);
+  });
+});
+
+describe("applyFilters — pets", () => {
+  const rows = [
+    row({ id: "anything", pets: "yes" }),
+    row({ id: "cats", pets: "cats_only" }),
+    row({ id: "dogs", pets: "dogs_only" }),
+    row({ id: "none-allowed", pets: "no" }),
+    row({ id: "never-asked", pets: "unknown" }),
+    row({ id: "pre-migration", pets: null }),
+  ];
+
+  it("matches one policy at a time", () => {
+    expect(ids(applyFilters(rows, filters({ pets: "yes" })))).toEqual(["anything"]);
+    expect(ids(applyFilters(rows, filters({ pets: "cats_only" })))).toEqual(["cats"]);
+    expect(ids(applyFilters(rows, filters({ pets: "dogs_only" })))).toEqual(["dogs"]);
+    expect(ids(applyFilters(rows, filters({ pets: "no" })))).toEqual(["none-allowed"]);
+  });
+
+  it("reads a null column as 'unknown', matching the column default", () => {
+    // Rows written before 0005 have no value at all; they are unanswered
+    // questions, not a policy of their own.
+    expect(ids(applyFilters(rows, filters({ pets: "unknown" })))).toEqual([
+      "never-asked",
+      "pre-migration",
+    ]);
+  });
+
+  it("passes everything through on 'all'", () => {
+    expect(applyFilters(rows, filters({ pets: "all" }))).toHaveLength(rows.length);
+  });
+
+  it("intersects with the other filters rather than unioning them", () => {
+    expect(
+      applyFilters(rows, filters({ pets: "yes", status: "applied" })),
+    ).toEqual([]);
+  });
+});
+
+describe("sortRows — pets", () => {
+  const rows = [
+    row({ id: "never-asked", pets: "unknown" }),
+    row({ id: "none-allowed", pets: "no" }),
+    row({ id: "anything", pets: "yes" }),
+    row({ id: "dogs", pets: "dogs_only" }),
+    row({ id: "cats", pets: "cats_only" }),
+  ];
+
+  it("ranks most permissive first rather than alphabetically", () => {
+    // Alphabetically "yes" sorts last, which would bury the answer everyone
+    // is scanning for.
+    expect(ids(sortRows(rows, { key: "pets", dir: "asc" }))).toEqual([
+      "anything",
+      "cats",
+      "dogs",
+      "none-allowed",
+      "never-asked",
+    ]);
+  });
+
+  it("reverses cleanly", () => {
+    expect(ids(sortRows(rows, { key: "pets", dir: "desc" }))).toEqual([
+      "never-asked",
+      "none-allowed",
+      "dogs",
+      "cats",
+      "anything",
+    ]);
+  });
+
+  it("sorts a null column with the unknowns, not as a blank", () => {
+    const withNull = [row({ id: "pre-migration", pets: null }), ...rows];
+    expect(ids(sortRows(withNull, { key: "pets", dir: "asc" })).slice(-2)).toEqual([
+      "pre-migration",
+      "never-asked",
+    ]);
+  });
+
+  it("opens ascending on the first click", () => {
+    expect(defaultSortDir("pets")).toBe("asc");
   });
 });
 

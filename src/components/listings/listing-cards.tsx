@@ -8,6 +8,7 @@ import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
+import { PetsMark } from "@/components/listings/pets-mark";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { FEE_TYPE_LABELS, bedsBaths, listingLabel, money } from "@/lib/format";
 
@@ -54,9 +55,12 @@ export function ListingCards({
           </div>
 
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span className="truncate">
-              {FEE_TYPE_LABELS[row.fee_type ?? "unknown"]}
-              {row.broker ? ` · ${row.broker.name}` : ""}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <PetsMark pets={row.pets} notes={row.pet_notes} />
+              <span className="truncate">
+                {FEE_TYPE_LABELS[row.fee_type ?? "unknown"]}
+                {row.broker ? ` · ${row.broker.name}` : ""}
+              </span>
             </span>
             <PersonDot person={row.added_by_person} withName />
           </div>

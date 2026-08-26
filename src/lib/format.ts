@@ -46,6 +46,28 @@ export const STATUS_LABELS = {
   lost: "Lost",
 } as const;
 
+/** Long form, for selects and the detail page. */
+export const PETS_LABELS = {
+  yes: "Pets OK",
+  cats_only: "Cats only",
+  dogs_only: "Dogs only",
+  no: "No pets",
+  unknown: "Unknown",
+} as const;
+
+/**
+ * Short form for the table and the cards, where "Pets OK" would eat a column.
+ * `unknown` is an em dash rather than a word: an unanswered question should
+ * read as quiet as a blank cell, not as a fact about the apartment.
+ */
+export const PETS_MARKS = {
+  yes: "🐾 OK",
+  cats_only: "🐱 Cats",
+  dogs_only: "🐶 Dogs",
+  no: "🚫 No",
+  unknown: "—",
+} as const;
+
 export const INTERACTION_KIND_LABELS = {
   call: "Call",
   text: "Text",

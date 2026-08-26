@@ -44,13 +44,17 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
 - `supabase/migrations/0004_review_fixes.sql` — `log_interaction`, `mark_thread_read`,
   `merge_listings` redefined (follow-up columns carried across, merged targets
   refused), `brokers` + `people` added to the realtime publication
+- `supabase/migrations/0005_pets.sql` — `listings.pets` + `listings.pet_notes`,
+  `merge_listings` redefined again (the pet columns carried across, `'unknown'`
+  treated as an absence rather than an answer)
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
 MCP `apply_migration` tool. New changes go in a new numbered file; never edit an
 applied one.
 
-`merge_listings` is defined twice — 0003 is history, 0004 is the live version.
+`merge_listings` is defined three times — 0003 and 0004 are history, 0005 is the
+live version.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -96,6 +100,13 @@ Production and Preview.
   (`lower(regexp_replace(address||'|'||unit, '[^a-zA-Z0-9|]', '', 'g'))`). Change
   one and you must change the other. The add form checks it on blur and again on
   submit; post-hoc dupes use the `merge_listings` RPC from the detail page.
+- **`pets` defaults to `'unknown'`, which is an absence, not an answer.** The
+  column is never null on new rows, so the merge backfill cannot use a plain
+  `coalesce`: `merge_listings` (0005) takes the source's policy whenever the
+  target's is `'unknown'`, and `blankForMerge` in `mutations.ts` mirrors that
+  for the add-form's "merge into it" path. Change one and change the other.
+  Reads treat null (pre-0005 rows) and `'unknown'` the same — filter, sort,
+  select and chip all resolve `pets ?? "unknown"`.
 - **Qualification math**: `required = rent * income_multiplier` — NYC 40x means
   combined *annual* income >= 40x *monthly* rent. `SPEC.md` writes
   `rent * 12 * income_multiplier`, which applies the 40x twice; the convention it

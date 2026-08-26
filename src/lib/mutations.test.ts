@@ -42,6 +42,8 @@ const BASE: Listing = {
   income_multiplier: 40,
   trains: "L, G",
   notes: null,
+  pets: "unknown",
+  pet_notes: null,
   broker_id: null,
   added_by: null,
   status: "saved",
@@ -111,6 +113,36 @@ describe("meaningfulChanges — noisy columns", () => {
 
   it("still ignores them when prev is null", () => {
     expect(changes({ next_action: "Call", rent: 3300 }, null)).toEqual(["rent"]);
+  });
+});
+
+describe("meaningfulChanges — pets", () => {
+  it("treats the pet columns like any other typed-in column", () => {
+    // Nothing in `meaningfulChanges` knows about `pets`: it diffs whatever is
+    // in the patch minus the noisy list, so a new column is covered the day it
+    // is added. This is the test that says so.
+    expect(changes({ pets: "cats_only" })).toEqual(["pets"]);
+    expect(changes({ pet_notes: "under 25 lb" })).toEqual(["pet_notes"]);
+    expect(changes({ pets: "cats_only", pet_notes: "$500 deposit" })).toEqual([
+      "pets",
+      "pet_notes",
+    ]);
+  });
+
+  it("does not fire when the policy is re-picked unchanged", () => {
+    expect(changes({ pets: "unknown" })).toEqual([]);
+    expect(changes({ pets: "unknown", pet_notes: null })).toEqual([]);
+  });
+
+  it("counts clearing the notes as an edit", () => {
+    const withNotes = { ...BASE, pet_notes: "under 25 lb" };
+    expect(changes({ pet_notes: null }, withNotes)).toEqual(["pet_notes"]);
+    expect(changes({ pet_notes: "" }, withNotes)).toEqual(["pet_notes"]);
+  });
+
+  it("does not confuse an empty string with a null note", () => {
+    // `blank()` treats both as absent, so re-saving an empty box is not an edit.
+    expect(changes({ pet_notes: "" })).toEqual([]);
   });
 });
 

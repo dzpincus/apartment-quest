@@ -77,6 +77,8 @@ const FIELD_LABELS: Record<string, string> = {
   income_multiplier: "income multiplier",
   trains: "trains",
   notes: "notes",
+  pets: "pets",
+  pet_notes: "pet notes",
   broker_id: "broker",
   added_by: "added by",
   status: "status",
@@ -85,6 +87,17 @@ const FIELD_LABELS: Record<string, string> = {
 
 function blank(v: unknown) {
   return v === null || v === undefined || v === "";
+}
+
+/**
+ * "Nothing to say" for the merge backfill. `pets` defaults to `'unknown'`,
+ * which is an absence wearing a value's clothes: a plain `blank()` check would
+ * read the default as an answer, refuse to fill it from the duplicate, and
+ * happily overwrite a real answer with it. Mirrors the `case` in
+ * `merge_listings` (0005) — change one and change the other.
+ */
+function blankForMerge(column: string, v: unknown) {
+  return blank(v) || (column === "pets" && v === "unknown");
 }
 
 /** Loose equality: form inputs hand back strings where the row holds numbers. */
@@ -253,8 +266,8 @@ export async function mergeIntoExisting(
 ): Promise<Listing> {
   const filled: ListingPatch = {};
   for (const [k, v] of Object.entries(patch)) {
-    if (blank(v) || NOISY_COLUMNS.has(k)) continue;
-    if (blank((existing as unknown as Record<string, unknown>)[k])) {
+    if (blankForMerge(k, v) || NOISY_COLUMNS.has(k)) continue;
+    if (blankForMerge(k, (existing as unknown as Record<string, unknown>)[k])) {
       (filled as Record<string, unknown>)[k] = v;
     }
   }

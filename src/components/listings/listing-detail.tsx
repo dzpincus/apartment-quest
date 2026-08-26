@@ -21,6 +21,7 @@ import { VotesCard } from "@/components/listings/votes-card";
 import {
   FEE_OPTIONS,
   GUARANTOR_OPTIONS,
+  PETS_OPTIONS,
   choiceToGuarantor,
   guarantorToChoice,
   type GuarantorChoice,
@@ -31,7 +32,7 @@ import { useListing, useUnread } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
 import { listingLabel, money } from "@/lib/format";
 import { fmtDay, fmtNY } from "@/lib/time";
-import type { FeeType, Uuid } from "@/lib/types";
+import type { FeeType, PetsPolicy, Uuid } from "@/lib/types";
 
 export function ListingDetail({ id }: { id: Uuid }) {
   const { people } = usePerson();
@@ -233,6 +234,24 @@ function ListingDetailView({
                 onValueChange={(choice) =>
                   save({ guarantor_ok: choiceToGuarantor(choice) })
                 }
+              />
+            </DetailField>
+            <DetailField label="Pets">
+              <SimpleSelect<PetsPolicy>
+                size="sm"
+                className="w-40"
+                aria-label="Pets"
+                value={listing.pets ?? "unknown"}
+                options={PETS_OPTIONS}
+                onValueChange={(pets) => save({ pets })}
+              />
+            </DetailField>
+            <DetailField label="Pet notes">
+              <InlineEdit
+                label="pet notes"
+                value={listing.pet_notes}
+                placeholder="e.g. under 25 lb, $500 deposit"
+                onSave={(raw) => save({ pet_notes: toTextOrNull(raw) })}
               />
             </DetailField>
             <DetailField label="Income x">

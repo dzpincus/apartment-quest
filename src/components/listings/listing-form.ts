@@ -40,6 +40,8 @@ export const listingSchema = z.object({
   income_multiplier: numeric("Income multiplier"),
   trains: z.string().trim(),
   notes: z.string().trim(),
+  pets: z.enum(["yes", "cats_only", "dogs_only", "no", "unknown"]),
+  pet_notes: z.string().trim(),
   /** "none" = no broker. */
   broker_id: z.string(),
 });
@@ -62,6 +64,8 @@ export const LISTING_FORM_DEFAULTS: ListingFormValues = {
   income_multiplier: "40",
   trains: "",
   notes: "",
+  pets: "unknown",
+  pet_notes: "",
   broker_id: "none",
 };
 
@@ -86,6 +90,8 @@ export function toListingPatch(values: ListingFormValues): ListingPatch & { addr
     income_multiplier: dec(values.income_multiplier) ?? 40,
     trains: text(values.trains),
     notes: text(values.notes),
+    pets: values.pets,
+    pet_notes: text(values.pet_notes),
     broker_id: values.broker_id === "none" ? null : values.broker_id,
   };
 }

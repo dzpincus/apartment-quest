@@ -19,6 +19,8 @@ export type ListingStatus =
   | "lost";
 
 export type FeeType = "no_fee" | "fee" | "op" | "unknown";
+/** Pet policy. `unknown` is the column default — nobody has asked yet. */
+export type PetsPolicy = "yes" | "cats_only" | "dogs_only" | "no" | "unknown";
 export type VoteValue = "yes" | "no" | "maybe";
 export type InteractionKind = "call" | "email" | "text" | "tour" | "note";
 
@@ -83,6 +85,8 @@ export type Listing = {
   income_multiplier: number | null;
   trains: string | null;
   notes: string | null;
+  pets: PetsPolicy | null;
+  pet_notes: string | null;
   broker_id: Uuid | null;
   added_by: Uuid | null;
   status: ListingStatus | null;

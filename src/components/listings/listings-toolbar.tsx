@@ -8,6 +8,7 @@ import { AddListingDialog } from "@/components/listings/add-listing-dialog";
 import { IncomesPopover } from "@/components/listings/incomes-popover";
 import {
   FEE_FILTER_OPTIONS,
+  PETS_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
 } from "@/components/listings/options";
 import {
@@ -19,7 +20,7 @@ import {
   type SortKey,
 } from "@/lib/listing-filters";
 import { VOTE_LABELS, type MyVoteFilter } from "@/lib/votes";
-import type { FeeType, ListingStatus } from "@/lib/types";
+import type { FeeType, ListingStatus, PetsPolicy } from "@/lib/types";
 
 /** "My vote" — resolved against the person on this device, not everyone's. */
 const MY_VOTE_OPTIONS: SelectOption<MyVoteFilter>[] = [
@@ -37,6 +38,7 @@ const SORT_OPTIONS: SelectOption<SortKey>[] = [
   { value: "address", label: "Address" },
   { value: "neighborhood", label: "Neighborhood" },
   { value: "status", label: "Status" },
+  { value: "pets", label: "Pets" },
   { value: "votes", label: "Most yes" },
   { value: "next_action_due", label: "Next action due" },
 ];
@@ -117,6 +119,13 @@ export function ListingsToolbar({
           options={FEE_FILTER_OPTIONS}
           onValueChange={(v) => set("feeType", v)}
           aria-label="Fee filter"
+        />
+        <SimpleSelect<PetsPolicy | "all">
+          className="w-32"
+          value={filters.pets}
+          options={PETS_FILTER_OPTIONS}
+          onValueChange={(v) => set("pets", v)}
+          aria-label="Pets filter"
         />
         <SimpleSelect<MyVoteFilter>
           className="w-36"

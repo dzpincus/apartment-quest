@@ -6,9 +6,11 @@ import {
   listingLabel,
   money,
   moneyShort,
+  PETS_LABELS,
+  PETS_MARKS,
   STATUS_LABELS,
 } from "./format";
-import type { FeeType, InteractionKind, ListingStatus } from "./types";
+import type { FeeType, InteractionKind, ListingStatus, PetsPolicy } from "./types";
 
 describe("money", () => {
   it("renders whole dollars with separators", () => {
@@ -144,6 +146,27 @@ describe("label maps", () => {
     const feeTypes: FeeType[] = ["no_fee", "fee", "op", "unknown"];
     for (const feeType of feeTypes) expect(FEE_TYPE_LABELS[feeType]).toBeTruthy();
     expect(Object.keys(FEE_TYPE_LABELS)).toHaveLength(feeTypes.length);
+  });
+
+  it("names every pet policy, long and short", () => {
+    const policies: PetsPolicy[] = ["yes", "cats_only", "dogs_only", "no", "unknown"];
+    for (const policy of policies) {
+      expect(PETS_LABELS[policy]).toBeTruthy();
+      expect(PETS_MARKS[policy]).toBeTruthy();
+    }
+    expect(Object.keys(PETS_LABELS)).toHaveLength(policies.length);
+    expect(Object.keys(PETS_MARKS)).toHaveLength(policies.length);
+  });
+
+  it("keeps the marks short and the unknown one quiet", () => {
+    expect(PETS_LABELS.yes).toBe("Pets OK");
+    expect(PETS_LABELS.cats_only).toBe("Cats only");
+    expect(PETS_MARKS.yes).toBe("🐾 OK");
+    expect(PETS_MARKS.cats_only).toBe("🐱 Cats");
+    expect(PETS_MARKS.dogs_only).toBe("🐶 Dogs");
+    expect(PETS_MARKS.no).toBe("🚫 No");
+    // An unanswered question reads as a blank cell, not as a fact.
+    expect(PETS_MARKS.unknown).toBe("—");
   });
 
   it("names every interaction kind", () => {

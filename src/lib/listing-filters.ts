@@ -2,7 +2,7 @@
 
 import { matchesMyVote, voteScore, type MyVoteFilter } from "@/lib/votes";
 import type { ListingRow } from "@/lib/queries";
-import type { FeeType, ListingStatus, Uuid } from "@/lib/types";
+import type { FeeType, ListingStatus, PetsPolicy, Uuid } from "@/lib/types";
 
 export type Filters = {
   rentMin: string;
@@ -11,6 +11,8 @@ export type Filters = {
   neighborhood: string;
   status: ListingStatus | "all";
   feeType: FeeType | "all";
+  /** A null column reads as `unknown`, same as the select does. */
+  pets: PetsPolicy | "all";
   /** "How did *I* vote" — resolved against the person on this device. */
   myVote: MyVoteFilter;
 };
@@ -22,6 +24,7 @@ export const EMPTY_FILTERS: Filters = {
   neighborhood: "all",
   status: "all",
   feeType: "all",
+  pets: "all",
   myVote: "all",
 };
 
@@ -33,6 +36,7 @@ export function hasActiveFilters(f: Filters): boolean {
     f.neighborhood !== "all" ||
     f.status !== "all" ||
     f.feeType !== "all" ||
+    f.pets !== "all" ||
     f.myVote !== "all"
   );
 }
@@ -43,6 +47,7 @@ export type SortKey =
   | "rent"
   | "beds"
   | "fee_type"
+  | "pets"
   | "status"
   | "broker"
   | "votes"
@@ -50,6 +55,15 @@ export type SortKey =
   | "created_at";
 
 export type Sort = { key: SortKey; dir: "asc" | "desc" };
+
+/** Most permissive first — see the `pets` case in `sortValue`. */
+const PETS_RANK: Record<PetsPolicy, number> = {
+  yes: 0,
+  cats_only: 1,
+  dogs_only: 2,
+  no: 3,
+  unknown: 4,
+};
 
 /**
  * Which way a column sorts on its first click. Alphabetical columns read best
@@ -79,6 +93,7 @@ export function applyFilters(
     if (f.neighborhood !== "all" && (r.neighborhood ?? "") !== f.neighborhood) return false;
     if (f.status !== "all" && r.status !== f.status) return false;
     if (f.feeType !== "all" && (r.fee_type ?? "unknown") !== f.feeType) return false;
+    if (f.pets !== "all" && (r.pets ?? "unknown") !== f.pets) return false;
     if (!matchesMyVote(r.votes, personId, f.myVote)) return false;
     return true;
   });
@@ -94,6 +109,13 @@ function sortValue(row: ListingRow, key: SortKey): string | number | null {
       return row.neighborhood?.toLowerCase() ?? null;
     case "fee_type":
       return row.fee_type ?? null;
+    case "pets":
+      // Ranked, not alphabetical: sorting "Pets" should walk from the ones you
+      // can move into to the ones you cannot, and `cats_only < yes` as text
+      // would bury the answer everyone is looking for. Null reads as
+      // `unknown`, the column default, so it sorts last rather than sinking
+      // as a blank.
+      return PETS_RANK[row.pets ?? "unknown"];
     case "status":
       return row.status ?? null;
     case "votes":
