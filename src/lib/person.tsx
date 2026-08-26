@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPeople, queryKeys } from "@/lib/queries";
+import { humans } from "@/lib/people";
 import type { Person } from "@/lib/types";
 import {
   Dialog,
@@ -82,7 +83,23 @@ export function peopleQueryOptions() {
 export function PersonProvider({ children }: { children: React.ReactNode }) {
   const personId = useSyncExternalStore(subscribe, readPersonId, () => null);
 
-  const { data: people = [], isPending, error, refetch } = useQuery(peopleQueryOptions());
+  const { data: roster = [], isPending, error, refetch } = useQuery(peopleQueryOptions());
+
+  /**
+   * Quest Bot is a row in `people` (0006) because `activity.person_id` is NOT
+   * NULL and the sync run needs something to sign with — it is not one of us.
+   * Every consumer of this context is asking about *housemates*: the picker
+   * below, the incomes list, the vote rows, the four vote circles, the
+   * next-action owner and the qualification sum. So the roster is filtered
+   * once, here, with `isBot`.
+   *
+   * The two places the bot does appear — the activity feed and a queue row's
+   * owner dot — read their person from the query's own join
+   * (`activity.person`, `next_action_owner_person`), never from this list, so
+   * they keep rendering it with its own quiet-blue dot exactly like anyone
+   * else.
+   */
+  const people = useMemo(() => humans(roster), [roster]);
 
   const setPersonId = useCallback((id: string) => writePersonId(id), []);
 

@@ -38,7 +38,8 @@ Server-only vars (never `NEXT_PUBLIC_`, never read from a client component):
 |---|---|
 | `ANTHROPIC_API_KEY` | Listing import. Missing -> `/api/import` returns 503 `{disabled:true}` and the panel says import isn't configured. Nothing else breaks. |
 | `FIRECRAWL_API_KEY` | Optional. Rung two of the import ladder. Missing -> the ladder drops straight to the paste box. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Photos. Read only by `src/lib/supabase/admin.ts` (which imports `server-only`). Missing -> `/api/photos` returns 500 and photos cannot be saved; nothing else breaks. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Photos and sync. Read only by `src/lib/supabase/admin.ts` (which imports `server-only`). Missing -> `/api/photos` returns 500 and `/api/sync` returns 503 `{disabled:true}`; nothing else breaks. |
+| `CRON_SECRET` | Listing status sync. The bearer token pg_cron sends to `/api/sync`, compared in constant time. Missing -> every cron call is a 401; "Check now" still works, since that path uses the session. |
 
 Missing env does not break `pnpm build` — Supabase clients only throw when
 constructed at runtime, and the import route reads its key inside the request.
@@ -56,6 +57,13 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
 - `supabase/migrations/0005_pets.sql` — `listings.pets` + `listings.pet_notes`,
   `merge_listings` redefined again (the pet columns carried across, `'unknown'`
   treated as an absence rather than an answer)
+- `supabase/migrations/0006_listing_sync.sql` — `listings.listing_state` /
+  `state_checked_at` / `state_note`, the partial `listings_sync` index, the
+  `Quest Bot` person row, and the `pg_cron` + `pg_net` extensions. **Applies
+  after 0007**: photos shipped first and took the next number. The four
+  schedules and the Vault secrets are *not* in it — they carry the deployment
+  URL and `CRON_SECRET` — and live in `supabase/cron.sql.example`, applied by
+  hand (SQL editor or MCP `execute_sql`) once per project.
 - `supabase/migrations/0007_photos.sql` — `listing_photos` + the public
   `listing-photos` storage bucket and its three `storage.objects` policies,
   `merge_listings` redefined once more (a duplicate's photos follow the
@@ -63,7 +71,8 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
-MCP `apply_migration` tool. New changes go in a new numbered file; never edit an
+MCP `apply_migration` tool — except 0006, which is the one file whose number is
+older than its contents and goes last. New changes go in a new numbered file; never edit an
 applied one.
 
 `merge_listings` is defined four times — 0003, 0004 and 0005 are history, 0007 is
@@ -221,6 +230,90 @@ the `listings` / `listing(id)` keys, which is what makes an import feel live:
 the dialog navigates away while the route is still working and thumbnails
 appear one by one.
 
+## Sync
+
+Twice a day, every listing with a `url` gets looked at: `POST /api/sync` walks
+the same fetch ladder the import uses, decides whether the page is still
+selling the apartment, and writes `listing_state` — **never** `status`. A page
+that vanished is news, not a decision. The decision ("Mark lost" / "Still
+live") happens on Home, in front of the evidence.
+
+**The schedule is four cron jobs and one `if`.** Vercel Hobby crons run once a
+day in UTC, which cannot say "midnight and noon in New York"; GitHub Actions
+schedules drift by minutes to hours. So Supabase `pg_cron` + `pg_net` POST the
+route at **04, 05, 16 and 17 UTC** and the route computes the current hour in
+`America/New_York`, doing nothing unless it is 0 or 12. EDT makes 04/16 the
+right pair, EST makes it 05/17, and the two that are wrong return
+`{ skipped_hour_gate: true }` in milliseconds. Nothing needs redeploying in
+March or November. The statements live in `supabase/cron.sql.example`, with the
+URL and the secret in Vault so `select * from cron.job` cannot print the token.
+
+**Auth is two doors.** The cron sends `Authorization: Bearer $CRON_SECRET`,
+compared with `timingSafeEqual`. A browser cannot hold that secret, so the
+"Check now" button authenticates with the logged-in session instead — and a
+session may only ask for `?listing=<id>`, never a whole crawl. `src/proxy.ts`
+lets `/api/sync` past its signed-out guard, because it is the one route that
+legitimately arrives with no cookies at all; the route itself is the gate.
+
+**The ladder, with a smaller appetite.** Direct fetch, then Firecrawl, then say
+so. Rung two is skipped when the listing's own `state_note` starts with
+`blocked` and its `state_checked_at` is inside three days: a site that walled
+us off this morning will wall us off tonight, and 60 listings twice a day would
+eat Firecrawl's 500 free credits in under a week.
+
+**Classification is regex first, Haiku second** (`src/lib/import/classify.ts`;
+the pure half is tested). 404/410 or a redirect to `/for-rent` → `removed`; "no
+longer available" / "has been rented" / "rented on" → `off_market`; a price
+*and* a bedroom count with no contrary sentence → `active`. Only a page that
+says none of those costs a model call (`classify_listing`, forced tool, ≤8k
+chars of reduced text). Anything unproven is `unknown`, and `unknown` writes no
+activity row, shows no badge and moves nothing.
+
+**A block is not a state.** When every rung fails, `listing_state` is left
+exactly as it was and only `state_checked_at` and `state_note` move — a captcha
+wall can never quietly turn a live listing into a dead one. The detail page then
+says "last check blocked — site won't let us look" rather than presenting the
+stale chip as fact.
+
+**Quest Bot** (`people.key = 'bot'`, 0006) exists because `activity.person_id`
+is NOT NULL. It signs the `listing_state_changed` rows ("noticed 214 Grand St
+#4B looks gone (streeteasy.com: no longer available)" / "…is back up") and
+appears in the feed with the quiet blue that is deliberately not in the roster
+palette. `isBot` / `humans` (`src/lib/people.ts`, tested) keep it out of
+everything that means *housemate*: the picker, the incomes list, the vote rows,
+the four vote circles, the next-action owner and the qualification sum.
+`PersonProvider` filters the roster once, so `usePerson().people` is
+humans-only; the activity feed and the queue owner read their person from the
+query's own join instead, which is why the bot still renders there.
+
+**On screen**: Home gains a fourth section, **Vanished?**, under Gone quiet —
+`listing_state in (off_market, removed)`, with the evidence, when it was last
+checked, and two buttons: **Mark lost** (the ordinary `setListingStatus`) and
+**Still live** (`listing_state = 'active'`, note "manually confirmed", no
+activity row — correcting a robot is not an impression). It is not in the nav
+badge: news, not a deadline. The table and the cards show a `gone?` badge with
+the evidence as its `title`, and the detail page grows a "Link status" row —
+chip, "checked 3h ago", **Check now** — but only when the listing has a URL.
+
+**Forcing a run** (dev server on :3000, or swap in the deployment host):
+
+```bash
+# the cron's door: everything, hour gate skipped
+curl -sS -X POST "http://localhost:3000/api/sync?force=1" \
+  -H "Authorization: Bearer $CRON_SECRET" | jq
+
+# no bearer -> 401; right bearer at the wrong NY hour -> skipped_hour_gate
+curl -sS -X POST "http://localhost:3000/api/sync" | jq
+
+# one listing (what "Check now" sends, minus the session cookie)
+curl -sS -X POST "http://localhost:3000/api/sync?listing=<uuid>&force=1" \
+  -H "Authorization: Bearer $CRON_SECRET" | jq
+```
+
+Response: `{ ran, skipped_hour_gate, checked, changed: [{id,label,from,to}],
+blocked, errors }`, plus `checkedListing` on a single-listing run. Every run
+logs one `[sync] done` line carrying the same numbers.
+
 ## Design system — "Dusk Candy"
 
 **Dark only.** There is no light mode, no theme switcher and no `next-themes`
@@ -308,10 +401,14 @@ important on `bg-inset`.
 - **Follow-up queue**: bucketing lives in `src/lib/queue.ts` and is pure —
   `bucketListings(rows, { todayNY, now })` takes the clock as an argument so the
   boundaries are testable (`src/lib/queue.test.ts`). Buckets: overdue
-  (`next_action_due < today`), today (`= today`), cold (`status = 'contacted'`,
+  (`next_action_due < today`), today (`= today`), vanished (`listing_state` is
+  `off_market` / `removed` — see **Sync**), cold (`status = 'contacted'`,
   `last_contacted_at` older than 24h, no `next_action`). Merged rows and
   `passed` / `lost` are excluded, a listing lands in at most one bucket, and any
-  due date at all keeps a listing out of Cold. `setListingStatus` to passed/lost
+  due date at all keeps a listing out of Cold. Vanished loses to the two date
+  buckets (a commitment made for today outranks the news, and the row wears a
+  `gone?` badge wherever it lands) and beats Cold (a page that disappeared is a
+  better explanation of silence than nobody calling). `setListingStatus` to passed/lost
   nulls the follow-up triple so dead listings leave the queue. Home and the nav
   badge share one cache entry (`useQueueListings` reuses `queryKeys.listings`),
   so the badge costs no extra request.

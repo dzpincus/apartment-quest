@@ -19,6 +19,7 @@ import { InlineEdit } from "@/components/inline-edit";
 import { PersonDot } from "@/components/person-dot";
 import { VoteChips, VotePill, VOTE_TONE } from "@/components/listings/vote-chips";
 import { usePerson } from "@/lib/person";
+import { humans } from "@/lib/people";
 import { useMutations } from "@/lib/mutations";
 import { useVotes, type ListingRow, type VoteRow } from "@/lib/queries";
 import { findVote, VOTE_LABELS, VOTE_VALUES } from "@/lib/votes";
@@ -34,8 +35,9 @@ export function VotesCard({ listing }: { listing: ListingRow }) {
   // the embedded array is the fallback for the first render.
   const votes = data ?? listing.votes ?? [];
 
-  // Stable order regardless of when a row was seeded or renamed.
-  const roster = [...people].sort((a, b) => a.key.localeCompare(b.key));
+  // Stable order regardless of when a row was seeded or renamed. Housemates
+  // only: a robot does not get an opinion about an apartment.
+  const roster = humans(people).sort((a, b) => a.key.localeCompare(b.key));
 
   const target = { id: listing.id, address: listing.address, unit: listing.unit };
 

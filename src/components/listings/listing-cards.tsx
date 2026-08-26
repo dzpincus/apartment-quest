@@ -9,6 +9,7 @@ import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { PetsMark } from "@/components/listings/pets-mark";
 import { ListingThumb } from "@/components/listings/listing-thumb";
+import { GoneBadge } from "@/components/listings/gone-badge";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { FEE_TYPE_LABELS, bedsBaths, listingLabel, money } from "@/lib/format";
 
@@ -51,6 +52,7 @@ export function ListingCards({
                 <span className="flex items-center gap-1.5 text-[17px] font-black">
                   <span className="truncate">{listingLabel(row.address, row.unit)}</span>
                   <UnreadBadge count={unread.byListing[row.id] ?? 0} />
+                  <GoneBadge state={row.listing_state} note={row.state_note} />
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
                   {[row.neighborhood, bedsBaths(row.beds, row.baths), row.trains]

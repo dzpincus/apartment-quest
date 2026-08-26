@@ -7,6 +7,7 @@ import { ListingCards } from "@/components/listings/listing-cards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useListings } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
+import { humans } from "@/lib/people";
 import {
   applyFilters,
   EMPTY_FILTERS,
@@ -24,7 +25,10 @@ export default function ListingsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<Sort>({ key: "created_at", dir: "desc" });
 
-  const incomes = useMemo(() => people.map((p) => p.annual_income), [people]);
+  // The qualification column sums housemates. Quest Bot (0006) is a person row
+  // with an income of 0 and no business in this sum; `usePerson()` filters it
+  // already, and `humans()` here means that can never quietly stop being true.
+  const incomes = useMemo(() => humans(people).map((p) => p.annual_income), [people]);
   const hoods = useMemo(() => neighborhoods(listings), [listings]);
   // `person?.id` only matters to the "my vote" filter; everything else ignores it.
   const rows = useMemo(

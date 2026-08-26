@@ -14,6 +14,26 @@ export function fmtNY(date: Date | string | number, pattern = "MMM d, h:mma"): s
   return format(new TZDate(d, NY_TZ), pattern);
 }
 
+/**
+ * "3h ago" / "2d ago" / "just now" — how long since an instant, for the little
+ * grey line under a state chip ("checked 3h ago").
+ *
+ * Takes `now` rather than reading the clock, like everything else the queue
+ * compares, so a test can pin it and a tab left open can re-render it. No
+ * timezone anywhere: this is a duration, not a date.
+ */
+export function timeAgo(at: string | number | Date | null | undefined, now: Date): string {
+  if (at == null) return "never";
+  const ms = now.getTime() - (at instanceof Date ? at.getTime() : new Date(at).getTime());
+  if (Number.isNaN(ms)) return "never";
+  if (ms < 60_000) return "just now";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 /** New York wall-clock date object, for day arithmetic. */
 export function nowNY(now: Date = new Date()): TZDate {
   return new TZDate(now, NY_TZ);

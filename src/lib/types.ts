@@ -21,6 +21,16 @@ export type ListingStatus =
 export type FeeType = "no_fee" | "fee" | "op" | "unknown";
 /** Pet policy. `unknown` is the column default — nobody has asked yet. */
 export type PetsPolicy = "yes" | "cats_only" | "dogs_only" | "no" | "unknown";
+/**
+ * What the source page said last time the sync run looked (0006). Never the
+ * same thing as `ListingStatus`, which is what *we* decided: a page that
+ * vanished does not make a listing `lost` — a human does that.
+ *
+ * `unknown` is the column default and means "nobody has looked yet", which is
+ * also where a listing stays when the site blocks every check.
+ */
+export type ListingState = "active" | "off_market" | "removed" | "unknown";
+
 export type VoteValue = "yes" | "no" | "maybe";
 export type InteractionKind = "call" | "email" | "text" | "tour" | "note";
 
@@ -35,7 +45,9 @@ export type ActivityVerb =
   | "set_next_action"
   | "updated_document"
   | "merged_listing"
-  | "added_photos";
+  | "added_photos"
+  /** Written by Quest Bot from `/api/sync` — the listing page moved on. */
+  | "listing_state_changed";
 
 export type EntityType = "listing" | "broker" | "message" | "document";
 
@@ -91,6 +103,12 @@ export type Listing = {
   broker_id: Uuid | null;
   added_by: Uuid | null;
   status: ListingStatus | null;
+  /** Sync columns (0006). Written only by `/api/sync` and `setListingState`. */
+  listing_state: ListingState | null;
+  state_checked_at: Timestamptz | null;
+  /** The evidence, in the page's own words. A note starting with `blocked`
+   *  means the last check never saw the page at all. */
+  state_note: string | null;
   last_contacted_at: Timestamptz | null;
   next_action: string | null;
   next_action_due: DateOnly | null;

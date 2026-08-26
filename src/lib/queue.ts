@@ -5,17 +5,24 @@
  * same rows, and nothing here may touch `new Date()` implicitly — callers pass
  * `todayNY` and `now` so the boundaries are testable.
  *
- * The three buckets, per SPEC:
- * - overdue: `next_action_due < today`
- * - today:   `next_action_due = today`
- * - cold:    `status = 'contacted'` and `last_contacted_at < now - 24h`
- *            and `next_action` is null
+ * The four buckets:
+ * - overdue:  `next_action_due < today`
+ * - today:    `next_action_due = today`
+ * - vanished: the source page says `off_market` / `removed` (0006)
+ * - cold:     `status = 'contacted'` and `last_contacted_at < now - 24h`
+ *             and `next_action` is null
  *
- * A listing lands in at most one bucket (overdue > today > cold), merged rows
- * and dead statuses are excluded everywhere.
+ * A listing lands in at most one bucket (overdue > today > vanished > cold),
+ * merged rows and dead statuses are excluded everywhere.
+ *
+ * Vanished sits *under* the two date buckets on purpose: a commitment somebody
+ * made for today outranks the news, and the row carries a "gone?" badge in
+ * whichever bucket it lands in, so nothing is hidden by the ordering. It sits
+ * *over* cold because "the listing disappeared" is a better explanation of
+ * silence than "nobody has called".
  */
 
-import type { DateOnly, ListingStatus, Timestamptz, Uuid } from "@/lib/types";
+import type { DateOnly, ListingState, ListingStatus, Timestamptz, Uuid } from "@/lib/types";
 
 const DAY_MS = 86_400_000;
 
@@ -28,7 +35,7 @@ const CLOSED_STATUSES: ReadonlySet<ListingStatus> = new Set<ListingStatus>([
   "lost",
 ]);
 
-export type QueueBucket = "overdue" | "today" | "cold";
+export type QueueBucket = "overdue" | "today" | "vanished" | "cold";
 
 /** The columns bucketing reads. Anything wider (a `ListingRow`) satisfies it. */
 export type QueueFields = {
@@ -37,9 +44,25 @@ export type QueueFields = {
   next_action: string | null;
   next_action_due: DateOnly | null;
   last_contacted_at: Timestamptz | null;
+  listing_state: ListingState | null;
+  state_checked_at: Timestamptz | null;
 };
 
-export type Buckets<T> = { overdue: T[]; today: T[]; cold: T[] };
+export type Buckets<T> = { overdue: T[]; today: T[]; vanished: T[]; cold: T[] };
+
+/** The two states that mean the source page stopped offering the apartment. */
+const GONE_STATES: ReadonlySet<ListingState> = new Set<ListingState>([
+  "off_market",
+  "removed",
+]);
+
+/**
+ * Does the *page* say this listing is gone? Never consults `status` — that is
+ * ours to decide, and `bucketListings` has already dropped the dead ones.
+ */
+export function isVanished(listing: Pick<QueueFields, "listing_state">): boolean {
+  return listing.listing_state != null && GONE_STATES.has(listing.listing_state);
+}
 
 /**
  * `yyyy-MM-dd` → ms at UTC midnight. Only ever compared against another day
@@ -87,20 +110,35 @@ export function bucketListings<T extends QueueFields>(
 ): Buckets<T> {
   const today = dayMs(todayNY);
   const coldBefore = now.getTime() - COLD_AFTER_MS;
-  const out: Buckets<T> = { overdue: [], today: [], cold: [] };
+  const out: Buckets<T> = { overdue: [], today: [], vanished: [], cold: [] };
 
   for (const listing of listings) {
     if (listing.merged_into) continue;
     if (listing.status && CLOSED_STATUSES.has(listing.status)) continue;
 
+    // A due date means somebody already scheduled this: it is either late, it
+    // is today, or it is in the future.
     const due = listing.next_action_due ? dayMs(listing.next_action_due) : Number.NaN;
     if (!Number.isNaN(due)) {
-      // A due date means somebody already scheduled this: it is either late,
-      // it is today, or it is in the future and none of our business yet.
-      if (due < today) out.overdue.push(listing);
-      else if (due === today) out.today.push(listing);
+      if (due < today) {
+        out.overdue.push(listing);
+        continue;
+      }
+      if (due === today) {
+        out.today.push(listing);
+        continue;
+      }
+    }
+
+    // A listing whose page disappeared needs a person either way, and a due
+    // date next Tuesday is not a reason to sit on that until Tuesday.
+    if (isVanished(listing)) {
+      out.vanished.push(listing);
       continue;
     }
+
+    // A future due date is a commitment already made: not Cold, not ours yet.
+    if (!Number.isNaN(due)) continue;
 
     const last = listing.last_contacted_at ? Date.parse(listing.last_contacted_at) : Number.NaN;
     const cold =
@@ -116,7 +154,16 @@ export function bucketListings<T extends QueueFields>(
   out.cold.sort(
     (a, b) => Date.parse(a.last_contacted_at!) - Date.parse(b.last_contacted_at!),
   );
+  // Vanished is newest-first: this bucket is news, and the freshest news is
+  // the row somebody has not seen yet. A never-checked row (impossible in
+  // practice — a state comes from a check) sorts last rather than first.
+  out.vanished.sort((a, b) => checkedAt(b) - checkedAt(a));
   return out;
+}
+
+function checkedAt(listing: QueueFields): number {
+  const ms = listing.state_checked_at ? Date.parse(listing.state_checked_at) : Number.NaN;
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
 }
 
 const SMALL_NUMBERS = [
@@ -142,7 +189,12 @@ export function queueSubtitle(count: number): string {
   return `${n} thing${count === 1 ? "" : "s"} to poke at today.`;
 }
 
-/** Overdue + today: the number that belongs on the Home tab (SPEC: one badge). */
+/**
+ * Overdue + today: the number that belongs on the Home tab (SPEC: one badge).
+ * Vanished is deliberately not counted — it is news, not a deadline, and a
+ * permanent red dot for "somebody should look at this eventually" is how a
+ * badge stops meaning anything.
+ */
 export function needsAttentionCount<T>(buckets: Buckets<T>): number {
   return buckets.overdue.length + buckets.today.length;
 }

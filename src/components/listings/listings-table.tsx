@@ -20,6 +20,7 @@ import { VoteChips } from "@/components/listings/vote-chips";
 import { FEE_OPTIONS } from "@/components/listings/options";
 import { PetsMark } from "@/components/listings/pets-mark";
 import { ListingThumb } from "@/components/listings/listing-thumb";
+import { GoneBadge } from "@/components/listings/gone-badge";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { defaultSortDir, type Sort, type SortKey } from "@/lib/listing-filters";
@@ -141,6 +142,7 @@ function Row({
                 {row.address}
               </Link>
               <UnreadBadge count={unread} />
+              <GoneBadge state={row.listing_state} note={row.state_note} />
             </span>
             <InlineEdit
               label="unit"

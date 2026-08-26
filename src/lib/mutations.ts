@@ -24,7 +24,8 @@ import { createClient } from "@/lib/supabase/client";
 import { queryKeys, type ListingRow, type VoteRow } from "@/lib/queries";
 import { resizeImage, webpName } from "@/lib/images";
 import type { SavePhotosResponse } from "@/lib/photos-client";
-import { listingLabel, STATUS_LABELS } from "@/lib/format";
+import { LINK_STATE_LABELS, listingLabel, STATUS_LABELS } from "@/lib/format";
+import type { SyncResponse } from "@/lib/sync-types";
 import { upsertVote, withoutVote } from "@/lib/votes";
 import { fmtDay } from "@/lib/time";
 import type {
@@ -35,6 +36,7 @@ import type {
   Interaction,
   InteractionKind,
   Listing,
+  ListingState,
   ListingStatus,
   Message,
   NewBroker,
@@ -61,6 +63,13 @@ const NOISY_COLUMNS = new Set<string>([
   "next_action",
   "next_action_due",
   "next_action_owner",
+  // The sync columns (0006) are written by a robot twice a day and by the
+  // "Still live" button. Their news is the `listing_state_changed` line the
+  // sync writes itself; an "edited (link status)" row on top of it would be
+  // the same event twice, in the wrong words.
+  "listing_state",
+  "state_checked_at",
+  "state_note",
 ]);
 
 const FIELD_LABELS: Record<string, string> = {
@@ -234,6 +243,57 @@ export async function setListingStatus(
     });
   }
   return data as Listing;
+}
+
+/**
+ * What the *source page* says, as opposed to what we decided (`status`).
+ *
+ * Written by `/api/sync` on a schedule and by one button: "Still live" on
+ * Home's Vanished? section, when a person has looked at the page themselves
+ * and the robot was wrong. No activity row either way — a correction to a
+ * machine's guess is not an impression, and the sync's own
+ * `listing_state_changed` line already told the story. `state_checked_at`
+ * moves because a human looking *is* a check, and it postpones the next
+ * automatic one.
+ */
+export async function setListingState(
+  _personId: Uuid,
+  listing: Pick<Listing, "id">,
+  state: ListingState,
+  note: string | null,
+): Promise<Listing> {
+  const { data, error } = await createClient()
+    .from("listings")
+    .update({
+      listing_state: state,
+      state_note: note,
+      state_checked_at: new Date().toISOString(),
+    })
+    .eq("id", listing.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Listing;
+}
+
+/**
+ * "Check now" on the detail page: one listing, right now, hour gate skipped.
+ *
+ * Goes over the API route rather than through supabase-js because the fetch,
+ * the ladder and the Anthropic key all live server-side — the same shape as
+ * the photo writes. The route accepts a logged-in session *only* with
+ * `?listing=`, so this cannot start a full crawl.
+ */
+export async function checkListingNow(listingId: Uuid): Promise<SyncResponse> {
+  const res = await fetch(
+    `/api/sync?listing=${encodeURIComponent(listingId)}&force=1`,
+    { method: "POST" },
+  );
+  const body = (await res.json().catch(() => null)) as SyncResponse | null;
+  if (!res.ok || !body) {
+    throw new Error(body?.error ?? "Couldn't check that listing.");
+  }
+  return body;
 }
 
 /**
@@ -815,6 +875,51 @@ export function useMutations(personId: Uuid | undefined) {
     onError: onError("Could not change the status"),
   });
 
+  const linkState = useMutation({
+    mutationFn: (vars: {
+      listing: Pick<Listing, "id">;
+      state: ListingState;
+      note: string | null;
+    }) => setListingState(requirePerson(), vars.listing, vars.state, vars.note),
+    onSuccess: (listing) => invalidateListings(listing.id),
+    onError: onError("Could not update the link status"),
+  });
+
+  /**
+   * Owns its toast start to finish: a check is a fetch of somebody else's
+   * website and can take several seconds, so a button that merely goes quiet
+   * reads as broken. The same toast line turns into the answer.
+   */
+  const checkLink = useMutation<SyncResponse, unknown, Uuid, { toastId: string | number }>({
+    mutationFn: (listingId) => checkListingNow(listingId),
+    onMutate: () => ({ toastId: toast.loading("Looking at the listing page…") }),
+    onSuccess: (result, listingId, ctx) => {
+      const checked = result.checkedListing;
+      if (result.disabled) {
+        toast.error("Checking isn't configured on this deployment.", { id: ctx?.toastId });
+      } else if (!checked) {
+        toast.error("Couldn't check that listing.", { id: ctx?.toastId });
+      } else if (checked.blocked) {
+        toast.error("That site wouldn't let us look.", {
+          id: ctx?.toastId,
+          description: checked.note ?? undefined,
+        });
+      } else {
+        const gone = checked.state === "off_market" || checked.state === "removed";
+        toast.success(gone ? "Looks gone" : LINK_STATE_LABELS[checked.state], {
+          id: ctx?.toastId,
+          description: checked.note ?? undefined,
+        });
+      }
+      invalidateListings(listingId);
+    },
+    onError: (error, _listingId, ctx) => {
+      toast.error(field(error, "message") ?? "Couldn't check that listing.", {
+        id: ctx?.toastId,
+      });
+    },
+  });
+
   const merge = useMutation({
     mutationFn: (vars: { src: Pick<Listing, "id" | "address" | "unit">; dstId: Uuid }) =>
       mergeListings(requirePerson(), vars.src, vars.dstId),
@@ -1068,6 +1173,8 @@ export function useMutations(personId: Uuid | undefined) {
     createListing: create,
     updateListing: update,
     setListingStatus: status,
+    setListingState: linkState,
+    checkListingNow: checkLink,
     mergeListings: merge,
     mergeIntoExisting: mergeInto,
     logInteraction: logContact,

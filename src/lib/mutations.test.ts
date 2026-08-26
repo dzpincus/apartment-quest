@@ -47,6 +47,9 @@ const BASE: Listing = {
   broker_id: null,
   added_by: null,
   status: "saved",
+  listing_state: "active",
+  state_checked_at: "2025-08-26T04:00:00Z",
+  state_note: "streeteasy.com: price and beds still on the page",
   last_contacted_at: null,
   next_action: null,
   next_action_due: null,
@@ -92,9 +95,18 @@ describe("meaningfulChanges — noisy columns", () => {
     "next_action_owner",
   ] as const;
 
+  /** The sync columns (0006): a robot's twice-daily look is not an edit. */
+  const SYNC = ["listing_state", "state_checked_at", "state_note"] as const;
+
   it("never reports a follow-up column: phase 3 has its own verbs for those", () => {
     for (const column of NOISY) {
       expect(changes({ [column]: "2099-01-01" } as ListingPatch)).toEqual([]);
+    }
+  });
+
+  it("never reports a sync column: that news is the listing_state_changed row", () => {
+    for (const column of SYNC) {
+      expect(changes({ [column]: "removed" } as ListingPatch)).toEqual([]);
     }
   });
 

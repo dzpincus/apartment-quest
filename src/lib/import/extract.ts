@@ -40,6 +40,32 @@ export function importEnabled(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
+/**
+ * The SDK client, built per call. Shared with `classify.ts` (the sync run's
+ * second opinion) so there is one place that decides the key, the retry count
+ * and the timeout — and one place that turns a missing key into
+ * `ImportDisabledError` rather than a 500 from deep inside the SDK.
+ */
+export function anthropicClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new ImportDisabledError();
+  return new Anthropic({ apiKey, maxRetries: 1, timeout: 20_000 });
+}
+
+/** Anthropic's own failures, worded for a human. Shared with `classify.ts`. */
+export function extractionErrorFor(error: unknown): ExtractionError {
+  if (error instanceof Anthropic.APIError) {
+    if (error.status === 401 || error.status === 403) {
+      return new ExtractionError("The Anthropic API key was rejected.");
+    }
+    if (error.status === 429) {
+      return new ExtractionError("Rate-limited by Anthropic — try again in a moment.");
+    }
+    return new ExtractionError(`Anthropic returned ${error.status ?? "an error"}.`);
+  }
+  return new ExtractionError("Couldn't reach Anthropic.");
+}
+
 const SYSTEM = [
   "You read New York City rental listings and record exactly what the page says.",
   "",
@@ -120,11 +146,9 @@ export async function extractListing(
   content: string,
   opts: { url?: string | null } = {},
 ): Promise<ExtractResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new ImportDisabledError();
   if (!content.trim()) throw new ExtractionError("There was nothing to read.");
 
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 20_000 });
+  const client = anthropicClient();
 
   const header = opts.url
     ? `The text below was taken from ${opts.url}.\n\n`
@@ -143,16 +167,7 @@ export async function extractListing(
       messages: [{ role: "user", content: `${header}${content}` }],
     });
   } catch (error) {
-    if (error instanceof Anthropic.APIError) {
-      if (error.status === 401 || error.status === 403) {
-        throw new ExtractionError("The Anthropic API key was rejected.");
-      }
-      if (error.status === 429) {
-        throw new ExtractionError("Rate-limited by Anthropic — try again in a moment.");
-      }
-      throw new ExtractionError(`Anthropic returned ${error.status ?? "an error"}.`);
-    }
-    throw new ExtractionError("Couldn't reach Anthropic.");
+    throw extractionErrorFor(error);
   }
 
   const block = message.content.find(

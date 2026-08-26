@@ -1,0 +1,140 @@
+-- Apartment Quest — the sync schedules. NOT a migration.
+--
+-- These four statements are the other half of `0006_listing_sync.sql`. They
+-- live outside `supabase/migrations/` because every one of them carries a
+-- secret or a deployment URL, and a migration file is a file in the repo.
+-- Copy this, fill in the two placeholders, and run it once per project with
+-- the Supabase SQL editor or the Supabase MCP `execute_sql` tool. Re-runnable.
+--
+-- Requires 0006 (it creates `pg_cron` and `pg_net`). Cron jobs run as
+-- `postgres`, so RLS is not involved.
+
+-- 1. the secrets ------------------------------------------------------------
+-- Vault, not a literal in the schedule body: `cron.job` is readable by anyone
+-- who can read the database, and the command text would otherwise print the
+-- bearer token to every `select * from cron.job`.
+--
+-- `vault.create_secret` throws on a duplicate name, so re-running means
+-- updating instead. Both branches are here; keep whichever applies.
+
+select vault.create_secret(
+  'https://apartment-quest.vercel.app/api/sync',
+  'sync_url',
+  'Apartment Quest — the sync endpoint pg_cron POSTs to'
+);
+select vault.create_secret(
+  'REPLACE_WITH_CRON_SECRET',
+  'cron_secret',
+  'Apartment Quest — CRON_SECRET, matched by /api/sync against its own env'
+);
+
+-- Re-running on a project that already has them (use these instead of the two
+-- above, one at a time):
+--
+--   select vault.update_secret(
+--     (select id from vault.secrets where name = 'sync_url'),
+--     'https://apartment-quest.vercel.app/api/sync'
+--   );
+--   select vault.update_secret(
+--     (select id from vault.secrets where name = 'cron_secret'),
+--     'REPLACE_WITH_CRON_SECRET'
+--   );
+
+-- 2. the schedules ----------------------------------------------------------
+-- Four UTC jobs, one pair per US daylight-saving offset:
+--
+--   EDT (Mar-Nov, UTC-4): 04:00 UTC = midnight NY, 16:00 UTC = noon NY
+--   EST (Nov-Mar, UTC-5): 05:00 UTC = midnight NY, 17:00 UTC = noon NY
+--
+-- All four fire every day; the route computes the current hour in
+-- America/New_York and answers `{ skipped_hour_gate: true }` in under 100ms
+-- unless that hour is 0 or 12. So on any given day exactly two of the four do
+-- work, and the switch between them needs no deploy in March or November.
+-- pg_cron itself has no timezone, which is the whole reason for the gate.
+--
+-- `cron.schedule` upserts on the job name, so re-running this file re-points
+-- the existing jobs rather than creating duplicates.
+
+select cron.schedule(
+  'sync-04',
+  '0 4 * * *',
+  $$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'sync_url'),
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000
+  );
+  $$
+);
+
+select cron.schedule(
+  'sync-05',
+  '0 5 * * *',
+  $$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'sync_url'),
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000
+  );
+  $$
+);
+
+select cron.schedule(
+  'sync-16',
+  '0 16 * * *',
+  $$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'sync_url'),
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000
+  );
+  $$
+);
+
+select cron.schedule(
+  'sync-17',
+  '0 17 * * *',
+  $$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'sync_url'),
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000
+  );
+  $$
+);
+
+-- 3. checking on it ---------------------------------------------------------
+--
+--   select jobid, jobname, schedule, active from cron.job order by jobname;
+--
+--   select j.jobname, d.status, d.start_time, d.return_message
+--   from cron.job_run_details d join cron.job j using (jobid)
+--   order by d.start_time desc limit 20;
+--
+-- pg_net's own answer (the HTTP status Vercel gave back) lands separately:
+--
+--   select id, status_code, content, created
+--   from net._http_response order by created desc limit 10;
+--
+-- Undo:
+--
+--   select cron.unschedule('sync-04');
+--   select cron.unschedule('sync-05');
+--   select cron.unschedule('sync-16');
+--   select cron.unschedule('sync-17');

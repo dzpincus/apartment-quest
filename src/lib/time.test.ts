@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addDays, fmtDay, fmtNY, nowNY, todayNY, tomorrowNY } from "./time";
+import { addDays, fmtDay, fmtNY, nowNY, timeAgo, todayNY, tomorrowNY } from "./time";
 
 /**
  * These tests are written to hold under *any* `TZ`. Run
@@ -232,5 +232,31 @@ describe("tomorrowNY", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2025-12-31T18:00:00Z")); // 13:00 EST, Dec 31
     expect(tomorrowNY()).toBe("2026-01-01");
+  });
+});
+
+describe("timeAgo", () => {
+  const NOW = new Date("2025-08-27T18:00:00Z");
+
+  it("says just now for anything inside a minute", () => {
+    expect(timeAgo("2025-08-27T17:59:30Z", NOW)).toBe("just now");
+    expect(timeAgo(NOW, NOW)).toBe("just now");
+  });
+
+  it("counts minutes, then hours, then days", () => {
+    expect(timeAgo("2025-08-27T17:30:00Z", NOW)).toBe("30m ago");
+    expect(timeAgo("2025-08-27T15:00:00Z", NOW)).toBe("3h ago");
+    expect(timeAgo("2025-08-25T18:00:00Z", NOW)).toBe("2d ago");
+  });
+
+  it("switches from hours to days at 48, like coldFor", () => {
+    expect(timeAgo("2025-08-25T19:00:00Z", NOW)).toBe("47h ago");
+    expect(timeAgo("2025-08-25T18:00:00Z", NOW)).toBe("2d ago");
+  });
+
+  it("says never for a missing or unreadable timestamp", () => {
+    expect(timeAgo(null, NOW)).toBe("never");
+    expect(timeAgo(undefined, NOW)).toBe("never");
+    expect(timeAgo("not a date", NOW)).toBe("never");
   });
 });

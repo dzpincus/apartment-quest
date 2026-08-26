@@ -46,6 +46,18 @@ export const STATUS_LABELS = {
   lost: "Lost",
 } as const;
 
+/**
+ * What the *source page* says (`listing_state`, 0006) — never what we decided,
+ * which is `STATUS_LABELS` above. Short, because these go in a chip beside a
+ * "checked 3h ago". `unknown` reads as "nobody has looked", not as a fact.
+ */
+export const LINK_STATE_LABELS = {
+  active: "Still up",
+  off_market: "Off market",
+  removed: "Page gone",
+  unknown: "Not checked",
+} as const;
+
 /** Long form, for selects and the detail page. */
 export const PETS_LABELS = {
   yes: "Pets OK",

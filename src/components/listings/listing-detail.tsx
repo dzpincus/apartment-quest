@@ -16,6 +16,7 @@ import { InteractionsCard } from "@/components/listings/interactions-card";
 import { NextActionCard } from "@/components/listings/next-action-card";
 import { MergeIntoDialog } from "@/components/listings/merge-into-dialog";
 import { PhotoGallery } from "@/components/listings/photo-gallery";
+import { LinkStatus } from "@/components/listings/link-status";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VotesCard } from "@/components/listings/votes-card";
@@ -31,6 +32,7 @@ import { URL_RE } from "@/components/listings/listing-form";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useListing, useUnread } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
+import { humans } from "@/lib/people";
 import { listingLabel, money } from "@/lib/format";
 import { fmtDay, fmtNY } from "@/lib/time";
 import type { FeeType, PetsPolicy, Uuid } from "@/lib/types";
@@ -62,7 +64,9 @@ export function ListingDetail({ id }: { id: Uuid }) {
     <ListingDetailView
       key={listing.id}
       listing={listing}
-      incomes={people.map((p) => p.annual_income)}
+      // Quest Bot is a row in `people` (0006) with an income of 0; the
+      // qualification math counts housemates, so it is filtered, not relied on.
+      incomes={humans(people).map((p) => p.annual_income)}
     />
   );
 }
@@ -305,6 +309,14 @@ function ListingDetailView({
                 }}
               />
             </DetailField>
+            {/* Only when there is something to check. `state_checked_at` and
+                the chip beside it are written by /api/sync and by this row's
+                own "Check now"; nothing else in the form touches them. */}
+            {listing.url && (
+              <DetailField label="Link status">
+                <LinkStatus listing={listing} />
+              </DetailField>
+            )}
             <DetailField label="Added by">
               <PersonDot person={listing.added_by_person} withName />
             </DetailField>

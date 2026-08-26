@@ -8,6 +8,7 @@
 
 import Link from "next/link";
 import { PersonDot } from "@/components/person-dot";
+import { GoneBadge } from "@/components/listings/gone-badge";
 import { LogContactDialog } from "@/components/queue/log-contact-dialog";
 import { listingLabel } from "@/lib/format";
 import { coldFor, dueHint, type QueueBucket } from "@/lib/queue";
@@ -40,12 +41,17 @@ export function QueueRow({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link
-            href={`/listings/${row.id}`}
-            className="block truncate text-[17px] font-black underline-offset-4 hover:underline"
-          >
-            {listingLabel(row.address, row.unit)}
-          </Link>
+          {/* A listing can be overdue *and* gone — the due date wins the bucket
+              (queue.ts), so the badge is what stops that from hiding the news. */}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Link
+              href={`/listings/${row.id}`}
+              className="min-w-0 truncate text-[17px] font-black underline-offset-4 hover:underline"
+            >
+              {listingLabel(row.address, row.unit)}
+            </Link>
+            <GoneBadge state={row.listing_state} note={row.state_note} />
+          </span>
           <p className="truncate text-xs text-muted-foreground">
             {row.broker?.name ?? "no broker"}
             {row.neighborhood ? ` · ${row.neighborhood}` : ""}

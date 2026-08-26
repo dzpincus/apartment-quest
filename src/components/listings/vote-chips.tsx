@@ -14,6 +14,7 @@
 
 import { PersonDot } from "@/components/person-dot";
 import { usePerson } from "@/lib/person";
+import { humans } from "@/lib/people";
 import { VOTE_LABELS, voteTooltip } from "@/lib/votes";
 import { cn } from "@/lib/utils";
 import type { VoteRow } from "@/lib/queries";
@@ -68,8 +69,9 @@ export function VoteChips({
   className?: string;
 }) {
   const { people } = usePerson();
-  // Same order as the votes card, so a person keeps their slot everywhere.
-  const roster = [...people].sort((a, b) => a.key.localeCompare(b.key));
+  // Same order as the votes card, so a person keeps their slot everywhere —
+  // and the same roster, housemates only (Quest Bot never votes).
+  const roster = humans(people).sort((a, b) => a.key.localeCompare(b.key));
   if (roster.length === 0) return null;
 
   const title = voteTooltip(votes, (id) => people.find((p) => p.id === id)?.name);

@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { usePerson } from "@/lib/person";
+import { combinedIncome } from "@/lib/people";
 import { useMutations } from "@/lib/mutations";
 import { money } from "@/lib/format";
 import { toNumberOrNull } from "@/components/inline-edit";
@@ -26,7 +27,10 @@ export function IncomesPopover() {
   const { person, people } = usePerson();
   const { updatePersonName, updatePersonIncome } = useMutations(person?.id);
 
-  const combined = people.reduce((sum, p) => sum + (p.annual_income ?? 0), 0);
+  // Housemates only. `usePerson()` already drops Quest Bot (0006), and the
+  // number under "Combined" is the one the 40x check divides by, so it says so
+  // itself rather than trusting a filter two files away.
+  const combined = combinedIncome(people);
 
   return (
     <Popover>

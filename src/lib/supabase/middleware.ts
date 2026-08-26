@@ -22,6 +22,15 @@ function apiUnauthorized(error: string) {
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const isApi = request.nextUrl.pathname.startsWith("/api/");
+  /**
+   * The one route that is allowed to arrive signed out: pg_cron POSTs
+   * `/api/sync` with a bearer token and no cookies whatsoever, and this guard
+   * would answer it 401 before the route could compare that token. The route
+   * checks `CRON_SECRET` itself (constant time) and falls back to `getUser()`
+   * for the "Check now" button, so nothing is unlocked here — the decision is
+   * simply made one layer in.
+   */
+  const isCron = request.nextUrl.pathname === "/api/sync";
 
   const { url, key } = supabaseEnv();
   // No env means no way to check the session, so fail closed: everything but
@@ -29,6 +38,7 @@ export async function updateSession(request: NextRequest) {
   // misconfigured deployment the whole app, which then threw the moment it
   // tried to build a Supabase client. `/login` still renders, and says so.
   if (!url || !key) {
+    if (isCron) return response;
     if (isApi) return apiUnauthorized("Supabase isn't configured.");
     if (request.nextUrl.pathname === "/login") return response;
     const redirect = request.nextUrl.clone();
@@ -66,6 +76,7 @@ export async function updateSession(request: NextRequest) {
   const isLogin = pathname === "/login";
 
   if (!user && !isLogin) {
+    if (isCron) return response;
     if (isApi) return apiUnauthorized("Sign in first.");
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";

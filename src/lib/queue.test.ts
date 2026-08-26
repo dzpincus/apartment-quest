@@ -6,6 +6,7 @@ import {
   dayMs,
   daysBetween,
   dueHint,
+  isVanished,
   needsAttentionCount,
   type QueueFields,
 } from "./queue";
@@ -22,6 +23,8 @@ function listing(over: Partial<QueueFields> & { id: string }) {
     next_action: null,
     next_action_due: null,
     last_contacted_at: null,
+    listing_state: null,
+    state_checked_at: null,
     ...over,
   };
 }
@@ -134,7 +137,7 @@ describe("bucketListings — exclusions", () => {
         last_contacted_at: "2025-01-01T00:00:00Z",
       }),
     ]);
-    expect(b).toEqual({ overdue: [], today: [], cold: [] });
+    expect(b).toEqual({ overdue: [], today: [], vanished: [], cold: [] });
   });
 
   it("excludes merged rows", () => {
@@ -145,7 +148,117 @@ describe("bucketListings — exclusions", () => {
   });
 });
 
+describe("bucketListings — vanished", () => {
+  const gone = (id: string, over: Partial<QueueFields> = {}) =>
+    listing({
+      id,
+      listing_state: "off_market",
+      state_checked_at: "2025-08-27T12:00:00Z",
+      ...over,
+    });
+
+  it("buckets both gone states and nothing else", () => {
+    const b = bucket([
+      gone("off", { listing_state: "off_market" }),
+      gone("removed", { listing_state: "removed" }),
+      gone("active", { listing_state: "active" }),
+      gone("unknown", { listing_state: "unknown" }),
+      gone("never-checked", { listing_state: null }),
+    ]);
+    expect(ids(b.vanished)).toEqual(["off", "removed"]);
+  });
+
+  it("loses to an overdue action — the commitment outranks the news", () => {
+    const b = bucket([gone("a", { next_action_due: "2025-08-26", next_action: "Call" })]);
+    expect(ids(b.overdue)).toEqual(["a"]);
+    expect(ids(b.vanished)).toEqual([]);
+  });
+
+  it("loses to an action due today", () => {
+    const b = bucket([gone("a", { next_action_due: TODAY, next_action: "Call" })]);
+    expect(ids(b.today)).toEqual(["a"]);
+    expect(ids(b.vanished)).toEqual([]);
+  });
+
+  it("beats a due date in the future: a dead page will not get less dead by Tuesday", () => {
+    const b = bucket([gone("a", { next_action_due: "2025-09-04", next_action: "Tour" })]);
+    expect(ids(b.vanished)).toEqual(["a"]);
+    expect(ids(b.today)).toEqual([]);
+  });
+
+  it("beats cold: the page disappearing explains the silence", () => {
+    const b = bucket([
+      gone("a", { status: "contacted", last_contacted_at: "2025-08-01T00:00:00Z" }),
+    ]);
+    expect(ids(b.vanished)).toEqual(["a"]);
+    expect(ids(b.cold)).toEqual([]);
+  });
+
+  it("still excludes passed, lost and merged rows", () => {
+    const b = bucket([
+      gone("passed", { status: "passed" }),
+      gone("lost", { status: "lost" }),
+      gone("merged", { merged_into: "some-uuid" }),
+    ]);
+    expect(ids(b.vanished)).toEqual([]);
+  });
+
+  it("puts the freshest news first", () => {
+    const b = bucket([
+      gone("old", { state_checked_at: "2025-08-20T12:00:00Z" }),
+      gone("newest", { state_checked_at: "2025-08-27T06:00:00Z" }),
+      gone("middle", { state_checked_at: "2025-08-25T12:00:00Z" }),
+    ]);
+    expect(ids(b.vanished)).toEqual(["newest", "middle", "old"]);
+  });
+
+  it("sorts an unreadable or missing check timestamp last rather than crashing", () => {
+    const b = bucket([
+      gone("broken", { state_checked_at: "not a date" }),
+      gone("none", { state_checked_at: null }),
+      gone("real", { state_checked_at: "2025-08-26T12:00:00Z" }),
+    ]);
+    expect(ids(b.vanished)[0]).toBe("real");
+    expect(ids(b.vanished)).toHaveLength(3);
+  });
+
+  it("keeps a listing in at most one bucket", () => {
+    const rows = [
+      gone("a"),
+      gone("b", { next_action_due: "2025-08-26" }),
+      gone("c", { status: "contacted", last_contacted_at: "2025-08-01T00:00:00Z" }),
+    ];
+    const b = bucket(rows);
+    const seen = [...b.overdue, ...b.today, ...b.vanished, ...b.cold].map((r) => r.id);
+    expect(seen).toHaveLength(new Set(seen).size);
+    expect(seen).toHaveLength(3);
+  });
+});
+
+describe("isVanished", () => {
+  it("is true only for the two gone states", () => {
+    expect(isVanished({ listing_state: "off_market" })).toBe(true);
+    expect(isVanished({ listing_state: "removed" })).toBe(true);
+    expect(isVanished({ listing_state: "active" })).toBe(false);
+    expect(isVanished({ listing_state: "unknown" })).toBe(false);
+    expect(isVanished({ listing_state: null })).toBe(false);
+  });
+});
+
 describe("needsAttentionCount", () => {
+  it("does not count vanished: it is news, not a deadline", () => {
+    const b = bucket([
+      listing({ id: "due", next_action_due: TODAY }),
+      listing({
+        id: "gone",
+        listing_state: "removed",
+        state_checked_at: "2025-08-27T12:00:00Z",
+      }),
+    ]);
+    expect(ids(b.vanished)).toEqual(["gone"]);
+    expect(needsAttentionCount(b)).toBe(1);
+  });
+
   it("counts overdue plus today, never cold", () => {
     const b = bucket([
       listing({ id: "a", next_action_due: "2025-08-26" }),
@@ -447,8 +560,8 @@ describe("bucketListings — status precedence", () => {
 });
 
 describe("bucketListings — shape guarantees", () => {
-  it("returns three empty buckets for an empty list", () => {
-    expect(bucket([])).toEqual({ overdue: [], today: [], cold: [] });
+  it("returns four empty buckets for an empty list", () => {
+    expect(bucket([])).toEqual({ overdue: [], today: [], vanished: [], cold: [] });
     expect(needsAttentionCount(bucket([]))).toBe(0);
   });
 
