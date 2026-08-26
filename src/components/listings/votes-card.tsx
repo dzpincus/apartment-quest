@@ -11,6 +11,11 @@
  *
  * Writes are optimistic (`useMutations().castVote`), so the pill flips on click
  * and the table's chips update in the same tick.
+ *
+ * Two shapes, one body. `compact` drops the Card chrome for a flat section with
+ * a top divider — that is the shape the listing header uses, where a second
+ * rounded card inside the header block would double every border. Everything
+ * else is identical: four rows, your own toggles, your own comment.
  */
 
 import { Button } from "@/components/ui/button";
@@ -27,7 +32,16 @@ import { fmtNY } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { Person, VoteValue } from "@/lib/types";
 
-export function VotesCard({ listing }: { listing: ListingRow }) {
+export function VotesCard({
+  listing,
+  compact = false,
+  className,
+}: {
+  listing: ListingRow;
+  /** Flat section instead of a Card — for the listing header. */
+  compact?: boolean;
+  className?: string;
+}) {
   const { person, people } = usePerson();
   const { castVote, clearVote } = useMutations(person?.id);
   const { data } = useVotes(listing.id);
@@ -46,34 +60,53 @@ export function VotesCard({ listing }: { listing: ListingRow }) {
   const cast = (prev: VoteRow | null, vote: VoteValue | null, comment: string | null) =>
     castVote.mutate({ listing: target, vote, comment, prev });
 
+  const rows = (
+    <>
+      {roster.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No people found. Run supabase/seed.sql.
+        </p>
+      )}
+      {roster.map((who) => {
+        const vote = findVote(votes, who.id);
+        return (
+          <VoteRowView
+            key={who.id}
+            who={who}
+            vote={vote}
+            isMe={who.id === person?.id}
+            compact={compact}
+            onCast={(next, comment) => cast(vote, next, comment)}
+            onClear={() => clearVote.mutate(target)}
+          />
+        );
+      })}
+    </>
+  );
+
+  if (compact) {
+    return (
+      <section className={cn("w-full border-t border-border pt-3", className)}>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-black tracking-wide text-muted-foreground uppercase">
+            Votes
+          </h2>
+          <VoteChips votes={votes} />
+        </div>
+        <div className="grid gap-2">{rows}</div>
+      </section>
+    );
+  }
+
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle>Votes</CardTitle>
           <VoteChips votes={votes} />
         </div>
       </CardHeader>
-      <CardContent className="grid gap-3">
-        {roster.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No people found. Run supabase/seed.sql.
-          </p>
-        )}
-        {roster.map((who) => {
-          const vote = findVote(votes, who.id);
-          return (
-            <VoteRowView
-              key={who.id}
-              who={who}
-              vote={vote}
-              isMe={who.id === person?.id}
-              onCast={(next, comment) => cast(vote, next, comment)}
-              onClear={() => clearVote.mutate(target)}
-            />
-          );
-        })}
-      </CardContent>
+      <CardContent className="grid gap-3">{rows}</CardContent>
     </Card>
   );
 }
@@ -82,17 +115,24 @@ function VoteRowView({
   who,
   vote,
   isMe,
+  compact = false,
   onCast,
   onClear,
 }: {
   who: Person;
   vote: VoteRow | null;
   isMe: boolean;
+  compact?: boolean;
   onCast: (vote: VoteValue | null, comment: string | null) => void;
   onClear: () => void;
 }) {
   return (
-    <div className="grid gap-1.5 border-b border-border pb-3 last:border-0 last:pb-0">
+    <div
+      className={cn(
+        "grid gap-1.5 border-b border-border last:border-0 last:pb-0",
+        compact ? "pb-2" : "pb-3",
+      )}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <PersonDot person={who} withName className="min-w-24 text-sm font-extrabold" />
         {isMe ? (

@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * Home is the follow-up queue, not a listing gallery (SPEC). Four sections,
- * always all four, each with its count — an empty Overdue section is the point
+ * Home is the follow-up queue, not a listing gallery (SPEC). Five sections,
+ * always all five, each with its count — an empty Overdue section is the point
  * of the screen, not something to hide.
  *
- * Each bucket owns one colour (coral late / yellow now / blue quiet), used for
- * the header chip and for the border of every card under it. Vanished? shares
- * the quiet blue with Gone quiet: neither is on fire, both want a person
- * eventually. It sits last, right above the activity feed, because it is news
- * rather than a deadline — and for the same reason it is not in the nav badge.
+ * Each bucket owns one colour (coral late / yellow now / blue quiet / mint
+ * new), used for the header chip and for the border of every card under it.
+ * Vanished? shares the quiet blue with Gone quiet: neither is on fire, both
+ * want a person eventually. It sits above New, which is last, right above the
+ * activity feed, because neither is a deadline — and for the same reason
+ * neither is in the nav badge.
  */
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,6 +45,13 @@ const SECTIONS: ReadonlyArray<{
     bucket: "vanished",
     title: "Vanished?",
     tone: "var(--quiet)",
+  },
+  {
+    // Its own mint, not `--yes` — that one is a person's colour as well as a
+    // vote's, and a bucket must never look like a housemate.
+    bucket: "fresh",
+    title: "New",
+    tone: "var(--fresh)",
   },
 ];
 

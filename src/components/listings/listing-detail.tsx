@@ -21,8 +21,12 @@ import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VotesCard } from "@/components/listings/votes-card";
 import {
+  AC_OPTIONS,
+  DISHWASHER_OPTIONS,
   FEE_OPTIONS,
   GUARANTOR_OPTIONS,
+  LAUNDRY_OPTIONS,
+  OUTDOOR_OPTIONS,
   PETS_OPTIONS,
   choiceToGuarantor,
   guarantorToChoice,
@@ -35,7 +39,15 @@ import { usePerson } from "@/lib/person";
 import { humans } from "@/lib/people";
 import { listingLabel, money } from "@/lib/format";
 import { fmtDay, fmtNY } from "@/lib/time";
-import type { FeeType, PetsPolicy, Uuid } from "@/lib/types";
+import type {
+  AcPolicy,
+  DishwasherPolicy,
+  FeeType,
+  LaundryPolicy,
+  OutdoorSpacePolicy,
+  PetsPolicy,
+  Uuid,
+} from "@/lib/types";
 
 export function ListingDetail({ id }: { id: Uuid }) {
   const { people } = usePerson();
@@ -155,6 +167,14 @@ function ListingDetailView({
               above only follows one hop of; the RPC now refuses it too. */}
           {!listing.merged_into && <MergeIntoDialog listing={listing} />}
         </div>
+
+        {/* Votes live in the header, directly under the CTA row: "what does
+            everyone think" is a header question, and burying it below the
+            thread meant scrolling past every field to answer it. `compact`
+            drops the Card chrome so this is one flat section on the same
+            surface, not a card inside a header. `w-full` is what makes the
+            flex-wrap above give it its own full-width line. */}
+        <VotesCard listing={listing} compact className="w-full" />
       </div>
 
       {/* Above the fields: what the place looks like is the first question
@@ -277,6 +297,48 @@ function ListingDetailView({
                 onSave={(raw) => save({ pet_notes: toTextOrNull(raw) })}
               />
             </DetailField>
+            {/* Amenities (0009). Same inline-select treatment as Pets: the
+                detail page is where an unanswered question gets answered. */}
+            <DetailField label="Laundry">
+              <SimpleSelect<LaundryPolicy>
+                size="sm"
+                className="w-40"
+                aria-label="Laundry"
+                value={listing.laundry ?? "unknown"}
+                options={LAUNDRY_OPTIONS}
+                onValueChange={(laundry) => save({ laundry })}
+              />
+            </DetailField>
+            <DetailField label="Dishwasher">
+              <SimpleSelect<DishwasherPolicy>
+                size="sm"
+                className="w-40"
+                aria-label="Dishwasher"
+                value={listing.dishwasher ?? "unknown"}
+                options={DISHWASHER_OPTIONS}
+                onValueChange={(dishwasher) => save({ dishwasher })}
+              />
+            </DetailField>
+            <DetailField label="AC">
+              <SimpleSelect<AcPolicy>
+                size="sm"
+                className="w-40"
+                aria-label="AC"
+                value={listing.ac ?? "unknown"}
+                options={AC_OPTIONS}
+                onValueChange={(ac) => save({ ac })}
+              />
+            </DetailField>
+            <DetailField label="Outdoor">
+              <SimpleSelect<OutdoorSpacePolicy>
+                size="sm"
+                className="w-40"
+                aria-label="Outdoor space"
+                value={listing.outdoor_space ?? "unknown"}
+                options={OUTDOOR_OPTIONS}
+                onValueChange={(outdoor_space) => save({ outdoor_space })}
+              />
+            </DetailField>
             <DetailField label="Income x">
               <InlineEdit
                 label="income multiplier"
@@ -354,8 +416,6 @@ function ListingDetailView({
           <Thread listingId={listing.id} className="h-[50vh] min-h-64" />
         </CardContent>
       </Card>
-
-      <VotesCard listing={listing} />
     </div>
   );
 }

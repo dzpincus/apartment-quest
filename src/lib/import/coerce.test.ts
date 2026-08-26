@@ -23,6 +23,10 @@ const GOOD: RawExtract = {
   guarantor_ok: "yes",
   pets: "yes",
   pet_notes: "Under 40 lb, $350 deposit",
+  laundry: "in_unit",
+  dishwasher: "yes",
+  ac: "central",
+  outdoor_space: "shared",
   trains: ["B", "D", "J", "N", "Q", "R", "Z", "6"],
   broker: {
     name: "Priya Raman",
@@ -50,6 +54,10 @@ describe("coerceExtract — the happy path", () => {
       fee_type: "no_fee",
       guarantor_ok: "yes",
       pets: "yes",
+      laundry: "in_unit",
+      dishwasher: "yes",
+      ac: "central",
+      outdoor_space: "shared",
       trains: "B D J N Q R Z 6",
       url: "https://streeteasy.com/building/92-bowery/7c",
     });
@@ -117,6 +125,81 @@ describe("coerceExtract — enums", () => {
       expect(fields.fee_type).toBeUndefined();
       expect(fields.pets).toBeUndefined();
     }
+  });
+});
+
+describe("coerceExtract — amenity enums (0009)", () => {
+  it("accepts every value the four columns allow", () => {
+    const at = (over: Partial<RawExtract>) => coerceExtract({ ...GOOD, ...over }).fields;
+    expect(at({ laundry: "in_building" }).laundry).toBe("in_building");
+    expect(at({ dishwasher: "no" }).dishwasher).toBe("no");
+    expect(at({ ac: "window" }).ac).toBe("window");
+    expect(at({ outdoor_space: "private" }).outdoor_space).toBe("private");
+  });
+
+  it("keeps `none`, which is an answer and not an absence", () => {
+    // "This building has no laundry" is worth storing, and `str()` reads the
+    // bare word "none" as a blank everywhere else — the enums are the
+    // exception.
+    const { fields } = coerceExtract({
+      ...GOOD,
+      laundry: "none",
+      ac: "none",
+      outdoor_space: "none",
+    });
+    expect(fields.laundry).toBe("none");
+    expect(fields.ac).toBe("none");
+    expect(fields.outdoor_space).toBe("none");
+  });
+
+  it("normalises the near misses a model actually emits", () => {
+    const at = (over: Partial<RawExtract>) => coerceExtract({ ...GOOD, ...over }).fields;
+    expect(at({ laundry: "In Unit" }).laundry).toBe("in_unit");
+    expect(at({ laundry: "washer dryer" }).laundry).toBe("in_unit");
+    expect(at({ laundry: "laundry room" }).laundry).toBe("in_building");
+    expect(at({ ac: "central air" }).ac).toBe("central");
+    expect(at({ ac: "window unit" }).ac).toBe("window");
+    expect(at({ outdoor_space: "balcony" }).outdoor_space).toBe("private");
+    expect(at({ outdoor_space: "roof deck" }).outdoor_space).toBe("shared");
+    expect(at({ dishwasher: "true" }).dishwasher).toBe("yes");
+  });
+
+  it("omits anything unknown or unrecognised so it cannot overwrite a blank", () => {
+    for (const value of ["unknown", "maybe?", "", null, "sometimes"]) {
+      const { fields } = coerceExtract({
+        ...GOOD,
+        laundry: value,
+        dishwasher: value,
+        ac: value,
+        outdoor_space: value,
+      });
+      expect(fields.laundry).toBeUndefined();
+      expect(fields.dishwasher).toBeUndefined();
+      expect(fields.ac).toBeUndefined();
+      expect(fields.outdoor_space).toBeUndefined();
+    }
+  });
+
+  it("never lets one column's vocabulary leak into another's", () => {
+    // `in_unit` is not a dishwasher answer and `central` is not a laundry one;
+    // an enum that is nearly right for a different column is still wrong.
+    const { fields } = coerceExtract({
+      ...GOOD,
+      dishwasher: "in_unit",
+      laundry: "central",
+      ac: "private",
+      outdoor_space: "in_building",
+    });
+    expect(fields.dishwasher).toBeUndefined();
+    expect(fields.laundry).toBeUndefined();
+    expect(fields.ac).toBeUndefined();
+    expect(fields.outdoor_space).toBeUndefined();
+  });
+
+  it("counts a real amenity as a filled field", () => {
+    const { filledKeys } = coerceExtract(GOOD);
+    expect(filledKeys).toContain("laundry");
+    expect(filledKeys).toContain("ac");
   });
 });
 

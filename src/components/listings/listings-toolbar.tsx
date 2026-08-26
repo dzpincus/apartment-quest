@@ -9,7 +9,11 @@ import { SimpleSelect, type SelectOption } from "@/components/simple-select";
 import { AddListingDialogSlot } from "@/components/listings/add-listing-dialog";
 import { IncomesPopover } from "@/components/listings/incomes-popover";
 import {
+  AC_FILTER_OPTIONS,
+  DISHWASHER_FILTER_OPTIONS,
   FEE_FILTER_OPTIONS,
+  LAUNDRY_FILTER_OPTIONS,
+  OUTDOOR_FILTER_OPTIONS,
   PETS_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
 } from "@/components/listings/options";
@@ -22,7 +26,15 @@ import {
   type SortKey,
 } from "@/lib/listing-filters";
 import { VOTE_LABELS, type MyVoteFilter } from "@/lib/votes";
-import type { FeeType, ListingStatus, PetsPolicy } from "@/lib/types";
+import type {
+  AcPolicy,
+  DishwasherPolicy,
+  FeeType,
+  LaundryPolicy,
+  ListingStatus,
+  OutdoorSpacePolicy,
+  PetsPolicy,
+} from "@/lib/types";
 
 /** "My vote" — resolved against the person on this device, not everyone's. */
 const MY_VOTE_OPTIONS: SelectOption<MyVoteFilter>[] = [
@@ -41,6 +53,7 @@ const SORT_OPTIONS: SelectOption<SortKey>[] = [
   { value: "neighborhood", label: "Neighborhood" },
   { value: "status", label: "Status" },
   { value: "pets", label: "Pets" },
+  { value: "amenities", label: "Amenities" },
   { value: "votes", label: "Most yes" },
   { value: "next_action_due", label: "Next action due" },
 ];
@@ -142,6 +155,34 @@ export function ListingsToolbar({
           options={PETS_FILTER_OPTIONS}
           onValueChange={(v) => set("pets", v)}
           aria-label="Pets filter"
+        />
+        <SimpleSelect<LaundryPolicy | "all">
+          className="w-40"
+          value={filters.laundry}
+          options={LAUNDRY_FILTER_OPTIONS}
+          onValueChange={(v) => set("laundry", v)}
+          aria-label="Laundry filter"
+        />
+        <SimpleSelect<DishwasherPolicy | "all">
+          className="w-36"
+          value={filters.dishwasher}
+          options={DISHWASHER_FILTER_OPTIONS}
+          onValueChange={(v) => set("dishwasher", v)}
+          aria-label="Dishwasher filter"
+        />
+        <SimpleSelect<AcPolicy | "all">
+          className="w-32"
+          value={filters.ac}
+          options={AC_FILTER_OPTIONS}
+          onValueChange={(v) => set("ac", v)}
+          aria-label="AC filter"
+        />
+        <SimpleSelect<OutdoorSpacePolicy | "all">
+          className="w-40"
+          value={filters.outdoor_space}
+          options={OUTDOOR_FILTER_OPTIONS}
+          onValueChange={(v) => set("outdoor_space", v)}
+          aria-label="Outdoor space filter"
         />
         <SimpleSelect<MyVoteFilter>
           className="w-36"

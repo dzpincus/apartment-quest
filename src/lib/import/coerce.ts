@@ -31,6 +31,10 @@ export type RawExtract = {
   guarantor_ok?: string | null;
   pets?: string | null;
   pet_notes?: string | null;
+  laundry?: string | null;
+  dishwasher?: string | null;
+  ac?: string | null;
+  outdoor_space?: string | null;
   trains?: string | string[] | null;
   broker?: {
     name?: string | null;
@@ -70,6 +74,12 @@ const LOW_CONFIDENCE = 0.4;
 const FEE_TYPES = new Set(["no_fee", "fee", "op", "unknown"]);
 const GUARANTOR = new Set(["yes", "no", "unknown"]);
 const PETS = new Set(["yes", "cats_only", "dogs_only", "no", "unknown"]);
+/** Amenities (0009). Same contract as every other enum here: anything that is
+ *  not one of these values is dropped, never guessed at. */
+const LAUNDRY = new Set(["in_unit", "in_building", "none", "unknown"]);
+const DISHWASHER = new Set(["yes", "no", "unknown"]);
+const AC = new Set(["central", "window", "none", "unknown"]);
+const OUTDOOR_SPACE = new Set(["private", "shared", "none", "unknown"]);
 
 /** `#4B` / `Apt 4B` / `Unit 4-B` hanging off the end of a street address. */
 const TRAILING_UNIT_RE =
@@ -141,6 +151,13 @@ function num(n: number, decimals = 0): string {
 }
 
 function enumOf(set: Set<string>, v: unknown): string | null {
+  // `str()` reads the bare word "none" as an absence, which is right for free
+  // text and wrong for the amenity enums (0009), where `none` is a real answer:
+  // "this apartment has no laundry" is worth storing. Only the sets that
+  // actually have a `none` member get the exemption.
+  const bare = v == null ? "" : String(v).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (bare === "none" && set.has("none")) return "none";
+
   const s = str(v).toLowerCase().replace(/[\s-]+/g, "_");
   if (!s) return null;
   if (set.has(s)) return s;
@@ -148,6 +165,22 @@ function enumOf(set: Set<string>, v: unknown): string | null {
   if (set.has("no_fee") && /^(nofee|no_fee|nofeeapartment|free)$/.test(s)) return "no_fee";
   if (set.has("op") && /^(owner_?paid|op_?fee|owner_?pays)$/.test(s)) return "op";
   if (set.has("cats_only") && /^cats?$/.test(s)) return "cats_only";
+  if (set.has("in_unit") && /^(in_?unit|washer_?dryer|w_?d_?in_?unit)$/.test(s)) {
+    return "in_unit";
+  }
+  if (set.has("in_building") && /^(in_?building|building|laundry_?room|basement|on_?site)$/.test(s)) {
+    return "in_building";
+  }
+  if (set.has("central") && /^(central_?air|central_?ac|central_?hvac)$/.test(s)) {
+    return "central";
+  }
+  if (set.has("window") && /^(window_?unit|window_?ac)$/.test(s)) return "window";
+  if (set.has("private") && /^(balcony|terrace|patio|yard|private_?outdoor)$/.test(s)) {
+    return "private";
+  }
+  if (set.has("shared") && /^(roof_?deck|courtyard|common|shared_?outdoor)$/.test(s)) {
+    return "shared";
+  }
   if (set.has("dogs_only") && /^dogs?$/.test(s)) return "dogs_only";
   if (set.has("yes") && /^(true|allowed|ok|y)$/.test(s)) return "yes";
   if (set.has("no") && /^(false|not_allowed|n)$/.test(s)) return "no";
@@ -259,6 +292,24 @@ export function coerceExtract(
   }
   const pets = enumOf(PETS, raw.pets);
   if (pets && pets !== "unknown") fields.pets = pets as ListingFormValues["pets"];
+
+  // Amenities: `unknown` and anything unrecognised are absences, so a model
+  // that shrugs can never overwrite what somebody typed. `none` is a real
+  // answer and is kept — "this apartment has no laundry" is worth knowing.
+  const laundry = enumOf(LAUNDRY, raw.laundry);
+  if (laundry && laundry !== "unknown") {
+    fields.laundry = laundry as ListingFormValues["laundry"];
+  }
+  const dishwasher = enumOf(DISHWASHER, raw.dishwasher);
+  if (dishwasher && dishwasher !== "unknown") {
+    fields.dishwasher = dishwasher as ListingFormValues["dishwasher"];
+  }
+  const ac = enumOf(AC, raw.ac);
+  if (ac && ac !== "unknown") fields.ac = ac as ListingFormValues["ac"];
+  const outdoor = enumOf(OUTDOOR_SPACE, raw.outdoor_space);
+  if (outdoor && outdoor !== "unknown") {
+    fields.outdoor_space = outdoor as ListingFormValues["outdoor_space"];
+  }
 
   const petNotes = str(raw.pet_notes);
   if (petNotes) fields.pet_notes = petNotes.slice(0, NOTES_MAX);

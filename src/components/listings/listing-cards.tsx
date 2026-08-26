@@ -8,6 +8,7 @@ import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { PetsMark } from "@/components/listings/pets-mark";
+import { AmenityMarks, amenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { useUnread, type ListingRow } from "@/lib/queries";
@@ -85,6 +86,10 @@ export function ListingCards({
                 className="text-xs font-extrabold text-muted-foreground"
               />
             </div>
+
+            {/* Amenities as their own chips: on a phone this is the line that
+                decides whether the listing is worth opening. */}
+            {amenityMarks(row).length > 0 && <AmenityMarks listing={row} variant="chips" />}
 
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <PetsMark pets={row.pets} notes={row.pet_notes} />

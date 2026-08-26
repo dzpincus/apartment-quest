@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  blankForMerge,
   clearVoteSummary,
   meaningfulChanges,
   voteSummary,
@@ -44,6 +45,10 @@ const BASE: Listing = {
   notes: null,
   pets: "unknown",
   pet_notes: null,
+  laundry: "unknown",
+  dishwasher: "unknown",
+  ac: "unknown",
+  outdoor_space: "unknown",
   broker_id: null,
   added_by: null,
   status: "saved",
@@ -215,6 +220,66 @@ describe("meaningfulChanges — no previous row", () => {
     // Note: `updateListing(…, prev = null)` bypasses this helper on purpose to
     // force a feed entry. This is the helper's own rule, not that path's.
     expect(changes({ notes: "", unit: null, rent: 2000 }, null)).toEqual(["rent"]);
+  });
+});
+
+describe("meaningfulChanges — amenities", () => {
+  it("treats the four amenity columns like any other typed-in column", () => {
+    expect(changes({ laundry: "in_unit" })).toEqual(["laundry"]);
+    expect(changes({ dishwasher: "yes" })).toEqual(["dishwasher"]);
+    expect(changes({ ac: "window" })).toEqual(["ac"]);
+    expect(changes({ outdoor_space: "private" })).toEqual(["outdoor_space"]);
+  });
+
+  it("says nothing when a patch re-states the `unknown` default", () => {
+    expect(
+      changes({
+        laundry: "unknown",
+        dishwasher: "unknown",
+        ac: "unknown",
+        outdoor_space: "unknown",
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("blankForMerge — what the merge backfill may overwrite", () => {
+  /**
+   * The mirror of the `case` arms in `merge_listings` (0005 for `pets`, 0009
+   * for the amenities). If these two ever disagree, the "merge into it" path in
+   * the add dialog and the RPC behind the detail page's Merge button start
+   * producing different rows for the same duplicate.
+   */
+  const UNKNOWN_COLUMNS = ["pets", "laundry", "dishwasher", "ac", "outdoor_space"];
+
+  it("reads `unknown` as an absence on every column that defaults to it", () => {
+    for (const column of UNKNOWN_COLUMNS) {
+      expect(blankForMerge(column, "unknown")).toBe(true);
+    }
+  });
+
+  it("reads a real answer as an answer", () => {
+    expect(blankForMerge("pets", "cats_only")).toBe(false);
+    expect(blankForMerge("laundry", "in_unit")).toBe(false);
+    expect(blankForMerge("laundry", "none")).toBe(false);
+    expect(blankForMerge("dishwasher", "no")).toBe(false);
+    expect(blankForMerge("ac", "window")).toBe(false);
+    expect(blankForMerge("outdoor_space", "shared")).toBe(false);
+  });
+
+  it("still treats null, undefined and the empty string as blank anywhere", () => {
+    for (const column of [...UNKNOWN_COLUMNS, "rent", "notes", "url"]) {
+      expect(blankForMerge(column, null)).toBe(true);
+      expect(blankForMerge(column, undefined)).toBe(true);
+      expect(blankForMerge(column, "")).toBe(true);
+    }
+  });
+
+  it("does not extend the `unknown` rule to columns that never default to it", () => {
+    // "unknown" is a legitimate string for a free-text column, and treating it
+    // as blank there would let a merge silently overwrite what somebody typed.
+    expect(blankForMerge("notes", "unknown")).toBe(false);
+    expect(blankForMerge("neighborhood", "unknown")).toBe(false);
   });
 });
 

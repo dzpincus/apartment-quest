@@ -42,6 +42,12 @@ export const listingSchema = z.object({
   notes: z.string().trim(),
   pets: z.enum(["yes", "cats_only", "dogs_only", "no", "unknown"]),
   pet_notes: z.string().trim(),
+  // Amenities (0009). Every one defaults to `unknown`, which the form treats
+  // as a blank: an import may fill it, but it never overwrites an answer.
+  laundry: z.enum(["in_unit", "in_building", "none", "unknown"]),
+  dishwasher: z.enum(["yes", "no", "unknown"]),
+  ac: z.enum(["central", "window", "none", "unknown"]),
+  outdoor_space: z.enum(["private", "shared", "none", "unknown"]),
   /** "none" = no broker. */
   broker_id: z.string(),
 });
@@ -66,6 +72,10 @@ export const LISTING_FORM_DEFAULTS: ListingFormValues = {
   notes: "",
   pets: "unknown",
   pet_notes: "",
+  laundry: "unknown",
+  dishwasher: "unknown",
+  ac: "unknown",
+  outdoor_space: "unknown",
   broker_id: "none",
 };
 
@@ -92,6 +102,10 @@ export function toListingPatch(values: ListingFormValues): ListingPatch & { addr
     notes: text(values.notes),
     pets: values.pets,
     pet_notes: text(values.pet_notes),
+    laundry: values.laundry,
+    dishwasher: values.dishwasher,
+    ac: values.ac,
+    outdoor_space: values.outdoor_space,
     broker_id: values.broker_id === "none" ? null : values.broker_id,
   };
 }

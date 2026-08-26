@@ -21,6 +21,18 @@ export type ListingStatus =
 export type FeeType = "no_fee" | "fee" | "op" | "unknown";
 /** Pet policy. `unknown` is the column default — nobody has asked yet. */
 export type PetsPolicy = "yes" | "cats_only" | "dogs_only" | "no" | "unknown";
+
+/**
+ * Amenities (0009). Four separate columns rather than a bag of booleans,
+ * because "laundry" has three useful answers and a boolean would flatten
+ * "in the basement" into "yes". `unknown` is the column default on all four
+ * and means nobody has asked yet — never "no", and treated as an absence by
+ * `merge_listings` and by `blankForMerge`, exactly like `pets`.
+ */
+export type LaundryPolicy = "in_unit" | "in_building" | "none" | "unknown";
+export type DishwasherPolicy = "yes" | "no" | "unknown";
+export type AcPolicy = "central" | "window" | "none" | "unknown";
+export type OutdoorSpacePolicy = "private" | "shared" | "none" | "unknown";
 /**
  * What the source page said last time the sync run looked (0006). Never the
  * same thing as `ListingStatus`, which is what *we* decided: a page that
@@ -100,6 +112,11 @@ export type Listing = {
   notes: string | null;
   pets: PetsPolicy | null;
   pet_notes: string | null;
+  /** Amenity columns (0009). Null is the pre-migration shape of `'unknown'`. */
+  laundry: LaundryPolicy | null;
+  dishwasher: DishwasherPolicy | null;
+  ac: AcPolicy | null;
+  outdoor_space: OutdoorSpacePolicy | null;
   broker_id: Uuid | null;
   added_by: Uuid | null;
   status: ListingStatus | null;

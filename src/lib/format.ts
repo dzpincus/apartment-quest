@@ -80,6 +80,69 @@ export const PETS_MARKS = {
   unknown: "—",
 } as const;
 
+/**
+ * Amenities (0009). Long labels for the selects and the detail page, short
+ * marks for the table's one combined column and the mobile cards.
+ *
+ * Same convention as `PETS_MARKS`: `unknown` is an em dash rather than a word,
+ * because an unanswered question must read as quietly as a blank cell — a
+ * listing nobody has asked about must never look like a listing with no
+ * laundry.
+ */
+export const LAUNDRY_LABELS = {
+  in_unit: "In-unit laundry",
+  in_building: "Laundry in building",
+  none: "No laundry",
+  unknown: "Unknown",
+} as const;
+
+export const LAUNDRY_MARKS = {
+  in_unit: "🧺 In-unit",
+  in_building: "🧺 Bldg",
+  none: "🚫 Laundry",
+  unknown: "—",
+} as const;
+
+export const DISHWASHER_LABELS = {
+  yes: "Dishwasher",
+  no: "No dishwasher",
+  unknown: "Unknown",
+} as const;
+
+export const DISHWASHER_MARKS = {
+  yes: "🍽️ DW",
+  no: "🚫 DW",
+  unknown: "—",
+} as const;
+
+export const AC_LABELS = {
+  central: "Central AC",
+  window: "Window AC",
+  none: "No AC",
+  unknown: "Unknown",
+} as const;
+
+export const AC_MARKS = {
+  central: "❄️ Central",
+  window: "❄️ Window",
+  none: "🚫 AC",
+  unknown: "—",
+} as const;
+
+export const OUTDOOR_LABELS = {
+  private: "Private outdoor space",
+  shared: "Shared outdoor space",
+  none: "No outdoor space",
+  unknown: "Unknown",
+} as const;
+
+export const OUTDOOR_MARKS = {
+  private: "🌿 Private",
+  shared: "🌿 Shared",
+  none: "🚫 Outdoor",
+  unknown: "—",
+} as const;
+
 export const INTERACTION_KIND_LABELS = {
   call: "Call",
   text: "Text",

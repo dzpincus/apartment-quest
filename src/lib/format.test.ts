@@ -6,11 +6,28 @@ import {
   listingLabel,
   money,
   moneyShort,
+  AC_LABELS,
+  AC_MARKS,
+  DISHWASHER_LABELS,
+  DISHWASHER_MARKS,
+  LAUNDRY_LABELS,
+  LAUNDRY_MARKS,
+  OUTDOOR_LABELS,
+  OUTDOOR_MARKS,
   PETS_LABELS,
   PETS_MARKS,
   STATUS_LABELS,
 } from "./format";
-import type { FeeType, InteractionKind, ListingStatus, PetsPolicy } from "./types";
+import type {
+  AcPolicy,
+  DishwasherPolicy,
+  FeeType,
+  InteractionKind,
+  LaundryPolicy,
+  ListingStatus,
+  OutdoorSpacePolicy,
+  PetsPolicy,
+} from "./types";
 
 describe("money", () => {
   it("renders whole dollars with separators", () => {
@@ -167,6 +184,71 @@ describe("label maps", () => {
     expect(PETS_MARKS.no).toBe("🚫 No");
     // An unanswered question reads as a blank cell, not as a fact.
     expect(PETS_MARKS.unknown).toBe("—");
+  });
+
+  it("names every amenity value, long and short", () => {
+    const laundry: LaundryPolicy[] = ["in_unit", "in_building", "none", "unknown"];
+    const dishwasher: DishwasherPolicy[] = ["yes", "no", "unknown"];
+    const ac: AcPolicy[] = ["central", "window", "none", "unknown"];
+    const outdoor: OutdoorSpacePolicy[] = ["private", "shared", "none", "unknown"];
+
+    for (const v of laundry) {
+      expect(LAUNDRY_LABELS[v]).toBeTruthy();
+      expect(LAUNDRY_MARKS[v]).toBeTruthy();
+    }
+    for (const v of dishwasher) {
+      expect(DISHWASHER_LABELS[v]).toBeTruthy();
+      expect(DISHWASHER_MARKS[v]).toBeTruthy();
+    }
+    for (const v of ac) {
+      expect(AC_LABELS[v]).toBeTruthy();
+      expect(AC_MARKS[v]).toBeTruthy();
+    }
+    for (const v of outdoor) {
+      expect(OUTDOOR_LABELS[v]).toBeTruthy();
+      expect(OUTDOOR_MARKS[v]).toBeTruthy();
+    }
+
+    expect(Object.keys(LAUNDRY_LABELS)).toHaveLength(laundry.length);
+    expect(Object.keys(LAUNDRY_MARKS)).toHaveLength(laundry.length);
+    expect(Object.keys(DISHWASHER_LABELS)).toHaveLength(dishwasher.length);
+    expect(Object.keys(DISHWASHER_MARKS)).toHaveLength(dishwasher.length);
+    expect(Object.keys(AC_LABELS)).toHaveLength(ac.length);
+    expect(Object.keys(AC_MARKS)).toHaveLength(ac.length);
+    expect(Object.keys(OUTDOOR_LABELS)).toHaveLength(outdoor.length);
+    expect(Object.keys(OUTDOOR_MARKS)).toHaveLength(outdoor.length);
+  });
+
+  it("keeps the amenity marks short and every unknown quiet", () => {
+    expect(LAUNDRY_MARKS.in_unit).toBe("🧺 In-unit");
+    expect(LAUNDRY_MARKS.in_building).toBe("🧺 Bldg");
+    expect(LAUNDRY_MARKS.none).toBe("🚫 Laundry");
+    expect(DISHWASHER_MARKS.yes).toBe("🍽️ DW");
+    expect(DISHWASHER_MARKS.no).toBe("🚫 DW");
+    expect(AC_MARKS.central).toBe("❄️ Central");
+    expect(AC_MARKS.window).toBe("❄️ Window");
+    expect(AC_MARKS.none).toBe("🚫 AC");
+    expect(OUTDOOR_MARKS.private).toBe("🌿 Private");
+    expect(OUTDOOR_MARKS.shared).toBe("🌿 Shared");
+    expect(OUTDOOR_MARKS.none).toBe("🚫 Outdoor");
+
+    // Same rule as pets: nobody asked reads as a blank cell, never as a fact.
+    for (const mark of [
+      LAUNDRY_MARKS.unknown,
+      DISHWASHER_MARKS.unknown,
+      AC_MARKS.unknown,
+      OUTDOOR_MARKS.unknown,
+    ]) {
+      expect(mark).toBe("—");
+    }
+  });
+
+  it("spells the amenity labels out where there is room for them", () => {
+    expect(LAUNDRY_LABELS.in_unit).toBe("In-unit laundry");
+    expect(LAUNDRY_LABELS.in_building).toBe("Laundry in building");
+    expect(DISHWASHER_LABELS.no).toBe("No dishwasher");
+    expect(AC_LABELS.central).toBe("Central AC");
+    expect(OUTDOOR_LABELS.shared).toBe("Shared outdoor space");
   });
 
   it("names every interaction kind", () => {

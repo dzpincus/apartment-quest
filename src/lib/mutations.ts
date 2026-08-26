@@ -90,6 +90,10 @@ const FIELD_LABELS: Record<string, string> = {
   notes: "notes",
   pets: "pets",
   pet_notes: "pet notes",
+  laundry: "laundry",
+  dishwasher: "dishwasher",
+  ac: "AC",
+  outdoor_space: "outdoor space",
   broker_id: "broker",
   added_by: "added by",
   status: "status",
@@ -101,14 +105,26 @@ function blank(v: unknown) {
 }
 
 /**
- * "Nothing to say" for the merge backfill. `pets` defaults to `'unknown'`,
- * which is an absence wearing a value's clothes: a plain `blank()` check would
- * read the default as an answer, refuse to fill it from the duplicate, and
- * happily overwrite a real answer with it. Mirrors the `case` in
- * `merge_listings` (0005) — change one and change the other.
+ * Columns whose default is `'unknown'` — an absence wearing a value's clothes.
+ * `pets` (0005) plus the four amenities (0009).
  */
-function blankForMerge(column: string, v: unknown) {
-  return blank(v) || (column === "pets" && v === "unknown");
+const UNKNOWN_IS_BLANK: ReadonlySet<string> = new Set([
+  "pets",
+  "laundry",
+  "dishwasher",
+  "ac",
+  "outdoor_space",
+]);
+
+/**
+ * "Nothing to say" for the merge backfill. These columns default to
+ * `'unknown'`, so a plain `blank()` check would read the default as an answer,
+ * refuse to fill it from the duplicate, and happily overwrite a real answer
+ * with it. Mirrors the `case` arms in `merge_listings` (0005 for `pets`, 0009
+ * for the amenities) — change one and change the other.
+ */
+export function blankForMerge(column: string, v: unknown) {
+  return blank(v) || (UNKNOWN_IS_BLANK.has(column) && v === "unknown");
 }
 
 /** Loose equality: form inputs hand back strings where the row holds numbers. */

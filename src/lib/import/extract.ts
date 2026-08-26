@@ -158,6 +158,11 @@ const SYSTEM = [
   "- available_date must be yyyy-MM-dd. If the page only says \"immediately\" or \"now\", omit it.",
   "- trains: subway lines actually named on the page, e.g. \"J M Z\". Omit if none are named.",
   "- broker: the listing agent and their brokerage, if the page names them.",
+  "- laundry / dishwasher / ac / outdoor_space: only what the page states outright.",
+  '  "Washer/dryer in unit" -> laundry "in_unit"; a shared laundry room or basement machines',
+  '  -> "in_building"; a page that says there is no laundry -> "none". A private balcony,',
+  '  terrace, patio or yard -> outdoor_space "private"; a shared roof deck or courtyard ->',
+  '  "shared". Never infer an amenity from a photo caption or from the neighborhood.',
   "- notes: at most 300 characters of genuinely notable amenities or terms",
   "  (laundry in unit, dishwasher, elevator, outdoor space, income requirements, lease length).",
   "  Not marketing copy, not the neighborhood description.",
@@ -188,6 +193,30 @@ const TOOL: Anthropic.Tool = {
       guarantor_ok: { type: "string", enum: ["yes", "no", "unknown"] },
       pets: { type: "string", enum: ["yes", "cats_only", "dogs_only", "no", "unknown"] },
       pet_notes: { type: "string", description: "Weight limits, deposits, breed rules." },
+      laundry: {
+        type: "string",
+        enum: ["in_unit", "in_building", "none", "unknown"],
+        description:
+          "in-unit washer/dryer → in_unit; laundry room/basement → in_building; explicitly none → none; else omit.",
+      },
+      dishwasher: {
+        type: "string",
+        enum: ["yes", "no", "unknown"],
+        description:
+          "A dishwasher named on the page → yes; explicitly none → no; else omit.",
+      },
+      ac: {
+        type: "string",
+        enum: ["central", "window", "none", "unknown"],
+        description:
+          "central air/HVAC → central; window units → window; explicitly none → none; else omit.",
+      },
+      outdoor_space: {
+        type: "string",
+        enum: ["private", "shared", "none", "unknown"],
+        description:
+          "private balcony/terrace/patio/yard → private; shared roof deck/courtyard → shared; explicitly none → none; else omit.",
+      },
       trains: { type: "string", description: 'Subway lines named on the page, e.g. "J M Z".' },
       broker: {
         type: "object",

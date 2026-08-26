@@ -73,6 +73,10 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   `pets` (`'unknown'` is an absence), `state_checked_at` as `greatest()` (the
   last time *anybody* looked, which is what the sync queue orders by),
   `state_note` as `coalesce()`. No schema change — one function
+- `supabase/migrations/0009_amenities.sql` — `listings.laundry` /
+  `dishwasher` / `ac` / `outdoor_space`, and `merge_listings` redefined a sixth
+  time so all four survive a merge (`'unknown'` is an absence, the same `case`
+  arm `pets` gets)
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
@@ -80,8 +84,8 @@ MCP `apply_migration` tool — except 0006, which is the one file whose number i
 older than its contents and goes last. New changes go in a new numbered file; never edit an
 applied one.
 
-`merge_listings` is defined five times — 0003, 0004, 0005 and 0007 are history,
-0008 is the live version.
+`merge_listings` is defined six times — 0003, 0004, 0005, 0007 and 0008 are
+history, 0009 is the live version.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -389,7 +393,7 @@ would be a second source of truth.
 | Row hover | `#34306a` | `hover:bg-surface-hover` |
 | Border / secondary button | `#3c3778` | `--border`, `--secondary` |
 | Primary | `#ffd56b` on `#1a1836` | `--primary`, `text-ink` |
-| Urgency | overdue `#ff7f9f` / today `#ffd56b` / quiet `#8ed8ff` | `--urgent`, `--due`, `--quiet` |
+| Urgency | overdue `#ff7f9f` / today `#ffd56b` / quiet `#8ed8ff` / new `#7fe3cd` | `--urgent`, `--due`, `--quiet`, `--fresh` |
 | Votes | yes `#9df0b5` / maybe `#ffd56b` / no `#ff7f9f` | `--yes`, `--maybe`, `--no` |
 
 `--radius` is `1rem`, so `rounded-xl` (what `Card` uses) is 22px; chips and
@@ -446,10 +450,28 @@ important on `bg-inset`.
   for the add-form's "merge into it" path. Change one and change the other.
   Reads treat null (pre-0005 rows) and `'unknown'` the same — filter, sort,
   select and chip all resolve `pets ?? "unknown"`.
+- **The amenity enums (0009) are `pets` four more times.** `laundry`
+  (`in_unit` / `in_building` / `none` / `unknown`), `dishwasher` (`yes` / `no` /
+  `unknown`), `ac` (`central` / `window` / `none` / `unknown`) and
+  `outdoor_space` (`private` / `shared` / `none` / `unknown`) each default to
+  `'unknown'`, which every layer treats as an absence: the `case` arms in
+  `merge_listings`, `UNKNOWN_IS_BLANK` in `mutations.ts`, the import's "omit
+  rather than guess" rule in `coerce.ts`, and `?? "unknown"` at every read.
+  `none` is the opposite — a real answer ("this building has no laundry") that
+  `coerce.ts` deliberately exempts from the word-that-means-blank list. The
+  table shows all four in one sortable **Amenities** column ranked by
+  `amenityRank` (laundry decides, then AC, then outdoor space, then the
+  dishwasher, packed lexicographically so a dishwasher can never outvote an
+  in-unit washer); the cards show them as chips; `unknown` prints nothing at
+  all rather than four em dashes.
 - **Qualification math**: `required = rent * income_multiplier` — NYC 40x means
   combined *annual* income >= 40x *monthly* rent. `SPEC.md` writes
   `rent * 12 * income_multiplier`, which applies the 40x twice; the convention it
   cites wins over its own formula. Documented in `qualification()`.
+  `QualifyBadge` prints the two numbers and nothing else (`$310k / $288k`,
+  combined over required), tinted mint or coral. There is no PASS/FAIL word:
+  the verdict was louder than the figures it was derived from, and "FAIL" is a
+  harsher sentence than a listing 2% over the line has earned.
 - **`person_id` comes from `usePerson()`** (`src/lib/person.tsx`), never from a prop
   drill or a fresh localStorage read, and is passed explicitly into every
   `mutations.ts` call (`useMutations(person?.id)`).
@@ -461,7 +483,11 @@ important on `bg-inset`.
   boundaries are testable (`src/lib/queue.test.ts`). Buckets: overdue
   (`next_action_due < today`), today (`= today`), vanished (`listing_state` is
   `off_market` / `removed` — see **Sync**), cold (`status = 'contacted'`,
-  `last_contacted_at` older than 24h, no `next_action`). Merged rows and
+  `last_contacted_at` older than 24h, no `next_action`), fresh (`status =
+  'saved'`, no `next_action`, nothing scheduled — the **New** section, newest
+  `created_at` first, lowest precedence of the five and deliberately *not* in
+  the nav badge: every listing starts there, so counting it would put a
+  permanent number on the tab). Merged rows and
   `passed` / `lost` are excluded, a listing lands in at most one bucket, and any
   due date at all keeps a listing out of Cold. Vanished loses to the two date
   buckets (a commitment made for today outranks the news, and the row wears a
@@ -525,7 +551,11 @@ important on `bg-inset`.
   the Votes column sorts by, the "my vote" filter, the cache patches) live in
   `src/lib/votes.ts` with tests; colours live once in `VOTE_TONE`
   (`vote-chips.tsx`). Only your own row in `VotesCard` is interactive, which is
-  a guard rail and not a permission — one shared login, no boundary.
+  a guard rail and not a permission — one shared login, no boundary. `VotesCard`
+  renders inside the detail **header**, under the CTA row, in its `compact`
+  shape: same four rows and the same toggles, but a flat section with a top
+  divider instead of a Card, because a card inside the header block doubles
+  every border.
 - **Time**: store UTC, render New York. Use `fmtNY` / `todayNY` from `src/lib/time.ts`;
   never `new Date().toLocaleString()` and never compare dates in local time.
 - **Mobile-first**: bottom tab bar under `md`, top bar at `md` and up.

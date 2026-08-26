@@ -29,8 +29,12 @@ import {
 } from "@/components/brokers/broker-form";
 import { ImportPanel } from "@/components/listings/import-panel";
 import {
+  AC_OPTIONS,
+  DISHWASHER_OPTIONS,
   FEE_OPTIONS,
   GUARANTOR_OPTIONS,
+  LAUNDRY_OPTIONS,
+  OUTDOOR_OPTIONS,
   PETS_OPTIONS,
   type GuarantorChoice,
 } from "@/components/listings/options";
@@ -53,7 +57,14 @@ import {
   useBrokers,
   useListingByDedupeKey,
 } from "@/lib/queries";
-import type { FeeType, PetsPolicy } from "@/lib/types";
+import type {
+  AcPolicy,
+  DishwasherPolicy,
+  FeeType,
+  LaundryPolicy,
+  OutdoorSpacePolicy,
+  PetsPolicy,
+} from "@/lib/types";
 
 const NEW_BROKER = "__new__";
 
@@ -532,6 +543,79 @@ function AddListingForm({
               placeholder="e.g. under 25 lb, $500 deposit"
               {...imported("pet_notes")}
               {...form.register("pet_notes")}
+            />
+          </Field>
+        </div>
+
+        {/* Amenities (0009), one row beside Pets: four selects, all defaulting
+            to "Unknown", which the import fills and a human overrides. */}
+        <div className="grid gap-3 sm:grid-cols-4">
+          <Field>
+            <FieldLabel htmlFor="laundry">Laundry</FieldLabel>
+            <Controller
+              control={form.control}
+              name="laundry"
+              render={({ field }) => (
+                <SimpleSelect<LaundryPolicy>
+                  id="laundry"
+                  value={field.value}
+                  options={LAUNDRY_OPTIONS}
+                  onValueChange={field.onChange}
+                  className={highlight.has("laundry") ? "import-flash" : undefined}
+                  aria-label="Laundry"
+                />
+              )}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="dishwasher">Dishwasher</FieldLabel>
+            <Controller
+              control={form.control}
+              name="dishwasher"
+              render={({ field }) => (
+                <SimpleSelect<DishwasherPolicy>
+                  id="dishwasher"
+                  value={field.value}
+                  options={DISHWASHER_OPTIONS}
+                  onValueChange={field.onChange}
+                  className={highlight.has("dishwasher") ? "import-flash" : undefined}
+                  aria-label="Dishwasher"
+                />
+              )}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="ac">AC</FieldLabel>
+            <Controller
+              control={form.control}
+              name="ac"
+              render={({ field }) => (
+                <SimpleSelect<AcPolicy>
+                  id="ac"
+                  value={field.value}
+                  options={AC_OPTIONS}
+                  onValueChange={field.onChange}
+                  className={highlight.has("ac") ? "import-flash" : undefined}
+                  aria-label="AC"
+                />
+              )}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="outdoor_space">Outdoor</FieldLabel>
+            <Controller
+              control={form.control}
+              name="outdoor_space"
+              render={({ field }) => (
+                <SimpleSelect<OutdoorSpacePolicy>
+                  id="outdoor_space"
+                  value={field.value}
+                  options={OUTDOOR_OPTIONS}
+                  onValueChange={field.onChange}
+                  className={highlight.has("outdoor_space") ? "import-flash" : undefined}
+                  aria-label="Outdoor space"
+                />
+              )}
             />
           </Field>
         </div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  amenityRank,
   applyFilters,
   defaultSortDir,
   EMPTY_FILTERS,
@@ -39,6 +40,10 @@ function row(over: Partial<ListingRow> & { id: string }): ListingRow {
     notes: null,
     pets: null,
     pet_notes: null,
+    laundry: null,
+    dishwasher: null,
+    ac: null,
+    outdoor_space: null,
     broker_id: null,
     added_by: null,
     status: "saved",
@@ -76,6 +81,11 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
       { feeType: "no_fee" },
       { pets: "yes" },
       { pets: "unknown" },
+      { laundry: "in_unit" },
+      { laundry: "unknown" },
+      { dishwasher: "yes" },
+      { ac: "central" },
+      { outdoor_space: "private" },
       { myVote: "yes" },
       { myVote: "none" },
     ];
@@ -92,6 +102,10 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
           status: "all",
           feeType: "all",
           pets: "all",
+          laundry: "all",
+          dishwasher: "all",
+          ac: "all",
+          outdoor_space: "all",
           myVote: "all",
         }),
       ),
@@ -300,6 +314,129 @@ describe("sortRows — pets", () => {
 
   it("opens ascending on the first click", () => {
     expect(defaultSortDir("pets")).toBe("asc");
+  });
+});
+
+describe("applyFilters — amenities", () => {
+  const rows = [
+    row({ id: "in-unit", laundry: "in_unit", dishwasher: "yes", ac: "central" }),
+    row({ id: "basement", laundry: "in_building", ac: "window" }),
+    row({ id: "laundromat", laundry: "none", dishwasher: "no", ac: "none" }),
+    row({ id: "never-asked", laundry: "unknown" }),
+    row({ id: "pre-migration" }),
+    row({ id: "balcony", outdoor_space: "private" }),
+    row({ id: "roof", outdoor_space: "shared" }),
+  ];
+
+  it("matches one laundry answer at a time", () => {
+    expect(ids(applyFilters(rows, filters({ laundry: "in_unit" })))).toEqual(["in-unit"]);
+    expect(ids(applyFilters(rows, filters({ laundry: "in_building" })))).toEqual([
+      "basement",
+    ]);
+    expect(ids(applyFilters(rows, filters({ laundry: "none" })))).toEqual(["laundromat"]);
+  });
+
+  it("matches the dishwasher, the AC and the outdoor space the same way", () => {
+    expect(ids(applyFilters(rows, filters({ dishwasher: "yes" })))).toEqual(["in-unit"]);
+    expect(ids(applyFilters(rows, filters({ dishwasher: "no" })))).toEqual(["laundromat"]);
+    expect(ids(applyFilters(rows, filters({ ac: "central" })))).toEqual(["in-unit"]);
+    expect(ids(applyFilters(rows, filters({ ac: "window" })))).toEqual(["basement"]);
+    expect(ids(applyFilters(rows, filters({ outdoor_space: "private" })))).toEqual([
+      "balcony",
+    ]);
+    expect(ids(applyFilters(rows, filters({ outdoor_space: "shared" })))).toEqual(["roof"]);
+  });
+
+  it("reads a null column as 'unknown', matching the column default", () => {
+    // Rows written before 0009 have no value at all; they are unanswered
+    // questions, not "this apartment has no laundry".
+    expect(ids(applyFilters(rows, filters({ laundry: "unknown" })))).toEqual([
+      "never-asked",
+      "pre-migration",
+      "balcony",
+      "roof",
+    ]);
+  });
+
+  it("passes everything through on 'all'", () => {
+    expect(
+      applyFilters(
+        rows,
+        filters({ laundry: "all", dishwasher: "all", ac: "all", outdoor_space: "all" }),
+      ),
+    ).toHaveLength(rows.length);
+  });
+
+  it("intersects the four rather than unioning them", () => {
+    expect(
+      ids(applyFilters(rows, filters({ laundry: "in_unit", ac: "central" }))),
+    ).toEqual(["in-unit"]);
+    expect(applyFilters(rows, filters({ laundry: "in_unit", ac: "window" }))).toEqual([]);
+  });
+});
+
+describe("sortRows — amenities", () => {
+  const rows = [
+    row({ id: "nothing" }),
+    row({ id: "laundromat", laundry: "none" }),
+    row({ id: "basement", laundry: "in_building" }),
+    row({ id: "in-unit", laundry: "in_unit" }),
+  ];
+
+  it("walks best-first: in_unit > in_building > none > unknown", () => {
+    expect(ids(sortRows(rows, { key: "amenities", dir: "asc" }))).toEqual([
+      "in-unit",
+      "basement",
+      "laundromat",
+      "nothing",
+    ]);
+  });
+
+  it("reverses cleanly", () => {
+    expect(ids(sortRows(rows, { key: "amenities", dir: "desc" }))).toEqual([
+      "nothing",
+      "laundromat",
+      "basement",
+      "in-unit",
+    ]);
+  });
+
+  it("lets laundry outrank the other three rather than adding them up", () => {
+    // A dishwasher, central AC and a terrace must not lift a laundry-less
+    // apartment above one with a washer in it — the packing is lexicographic.
+    const packed = [
+      row({ id: "everything-else", dishwasher: "yes", ac: "central", outdoor_space: "private" }),
+      row({ id: "just-laundry", laundry: "in_unit" }),
+    ];
+    expect(ids(sortRows(packed, { key: "amenities", dir: "asc" }))).toEqual([
+      "just-laundry",
+      "everything-else",
+    ]);
+  });
+
+  it("breaks a laundry tie on AC, then outdoor space, then the dishwasher", () => {
+    const tied = [
+      row({ id: "d", laundry: "in_unit" }),
+      row({ id: "c", laundry: "in_unit", dishwasher: "yes" }),
+      row({ id: "b", laundry: "in_unit", outdoor_space: "private" }),
+      row({ id: "a", laundry: "in_unit", ac: "central" }),
+    ];
+    expect(ids(sortRows(tied, { key: "amenities", dir: "asc" }))).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  it("sorts a null column with the unknowns rather than as a blank", () => {
+    expect(
+      amenityRank({ laundry: null, dishwasher: null, ac: null, outdoor_space: null }),
+    ).toBe(amenityRank({ laundry: "unknown", dishwasher: "unknown", ac: "unknown", outdoor_space: "unknown" }));
+  });
+
+  it("opens ascending on the first click", () => {
+    expect(defaultSortDir("amenities")).toBe("asc");
   });
 });
 

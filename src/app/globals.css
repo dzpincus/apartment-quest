@@ -27,6 +27,7 @@
   --color-urgent: var(--urgent);
   --color-due: var(--due);
   --color-quiet: var(--quiet);
+  --color-fresh: var(--fresh);
   --color-yes: var(--yes);
   --color-maybe: var(--maybe);
   --color-no: var(--no);
@@ -111,6 +112,10 @@
   --urgent: #ff7f9f;
   --due: #ffd56b;
   --quiet: #8ed8ff;
+  /* "New" on Home: nothing has happened to this listing yet. Deliberately not
+     `--yes` (#9df0b5) — that mint is also Brenna's roster colour, and a chip
+     that borrows a person's hex reads as "Brenna's listings". */
+  --fresh: #7fe3cd;
 
   /* Votes. `--yes-shadow` is the chunky lip under the Yes button. */
   --yes: #9df0b5;

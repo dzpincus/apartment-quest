@@ -25,6 +25,7 @@ function listing(over: Partial<QueueFields> & { id: string }) {
     last_contacted_at: null,
     listing_state: null,
     state_checked_at: null,
+    created_at: null,
     ...over,
   };
 }
@@ -137,7 +138,7 @@ describe("bucketListings — exclusions", () => {
         last_contacted_at: "2025-01-01T00:00:00Z",
       }),
     ]);
-    expect(b).toEqual({ overdue: [], today: [], vanished: [], cold: [] });
+    expect(b).toEqual({ overdue: [], today: [], vanished: [], cold: [], fresh: [] });
   });
 
   it("excludes merged rows", () => {
@@ -232,6 +233,91 @@ describe("bucketListings — vanished", () => {
     const seen = [...b.overdue, ...b.today, ...b.vanished, ...b.cold].map((r) => r.id);
     expect(seen).toHaveLength(new Set(seen).size);
     expect(seen).toHaveLength(3);
+  });
+});
+
+describe("bucketListings — fresh", () => {
+  const added = (id: string, over: Partial<QueueFields> = {}) =>
+    listing({ id, status: "saved", created_at: "2025-08-27T10:00:00Z", ...over });
+
+  it("collects saved listings nobody has planned anything for", () => {
+    const b = bucket([
+      added("new"),
+      added("planned", { next_action: "Call the broker" }),
+      added("contacted", { status: "contacted" }),
+      added("toured", { status: "toured" }),
+    ]);
+    expect(ids(b.fresh)).toEqual(["new"]);
+  });
+
+  it("treats a whitespace-only next action as no next action", () => {
+    const b = bucket([added("blank", { next_action: "   " })]);
+    expect(ids(b.fresh)).toEqual(["blank"]);
+  });
+
+  it("puts the newest addition first", () => {
+    const b = bucket([
+      added("older", { created_at: "2025-08-20T12:00:00Z" }),
+      added("newest", { created_at: "2025-08-27T06:00:00Z" }),
+      added("middle", { created_at: "2025-08-25T12:00:00Z" }),
+    ]);
+    expect(ids(b.fresh)).toEqual(["newest", "middle", "older"]);
+  });
+
+  it("sorts an unreadable or missing created_at last rather than crashing", () => {
+    const b = bucket([
+      added("broken", { created_at: "not a date" }),
+      added("none", { created_at: null }),
+      added("real", { created_at: "2025-08-26T12:00:00Z" }),
+    ]);
+    expect(ids(b.fresh)[0]).toBe("real");
+    expect(b.fresh).toHaveLength(3);
+  });
+
+  it("loses to every other bucket — it is the lowest precedence there is", () => {
+    const b = bucket([
+      added("overdue", { next_action_due: "2025-08-26" }),
+      added("today", { next_action_due: TODAY }),
+      added("gone", { listing_state: "removed", state_checked_at: NOW.toISOString() }),
+    ]);
+    expect(ids(b.overdue)).toEqual(["overdue"]);
+    expect(ids(b.today)).toEqual(["today"]);
+    expect(ids(b.vanished)).toEqual(["gone"]);
+    expect(ids(b.fresh)).toEqual([]);
+  });
+
+  it("never overlaps with cold: cold is `contacted`, fresh is `saved`", () => {
+    const b = bucket([
+      added("quiet", {
+        status: "contacted",
+        last_contacted_at: "2025-08-01T00:00:00Z",
+      }),
+      added("untouched"),
+    ]);
+    expect(ids(b.cold)).toEqual(["quiet"]);
+    expect(ids(b.fresh)).toEqual(["untouched"]);
+  });
+
+  it("leaves out a saved listing already scheduled for a future day", () => {
+    // A due date is a commitment somebody already made, which is exactly why
+    // it keeps a listing out of Cold too. Nothing "new" about it.
+    const b = bucket([added("booked", { next_action_due: "2025-09-04" })]);
+    expect(ids(b.fresh)).toEqual([]);
+  });
+
+  it("still excludes passed, lost and merged rows", () => {
+    const b = bucket([
+      added("passed", { status: "passed" }),
+      added("lost", { status: "lost" }),
+      added("merged", { merged_into: "some-uuid" }),
+    ]);
+    expect(ids(b.fresh)).toEqual([]);
+  });
+
+  it("is not a deadline, so it never reaches the nav badge", () => {
+    const b = bucket([added("a"), added("b"), listing({ id: "due", next_action_due: TODAY })]);
+    expect(ids(b.fresh)).toEqual(["a", "b"]);
+    expect(needsAttentionCount(b)).toBe(1);
   });
 });
 
@@ -560,8 +646,14 @@ describe("bucketListings — status precedence", () => {
 });
 
 describe("bucketListings — shape guarantees", () => {
-  it("returns four empty buckets for an empty list", () => {
-    expect(bucket([])).toEqual({ overdue: [], today: [], vanished: [], cold: [] });
+  it("returns five empty buckets for an empty list", () => {
+    expect(bucket([])).toEqual({
+      overdue: [],
+      today: [],
+      vanished: [],
+      cold: [],
+      fresh: [],
+    });
     expect(needsAttentionCount(bucket([]))).toBe(0);
   });
 

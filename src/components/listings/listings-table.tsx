@@ -19,6 +19,7 @@ import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { FEE_OPTIONS } from "@/components/listings/options";
 import { PetsMark } from "@/components/listings/pets-mark";
+import { AmenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { useRowEdit } from "@/components/listings/use-row-edit";
@@ -35,6 +36,7 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "beds", label: "Bd / Ba" },
   { key: "fee_type", label: "Fee" },
   { key: "pets", label: "Pets" },
+  { key: "amenities", label: "Amenities" },
   { key: "status", label: "Status" },
   { key: "votes", label: "Votes" },
   { key: "broker", label: "Broker" },
@@ -212,6 +214,12 @@ function Row({
 
       <TableCell>
         <PetsMark pets={row.pets} notes={row.pet_notes} />
+      </TableCell>
+
+      {/* Four columns, one cell: laundry / dishwasher / AC / outdoor space,
+          with the unanswered ones left out. Sorted by `amenityRank`. */}
+      <TableCell className="max-w-44">
+        <AmenityMarks listing={row} className="text-xs" />
       </TableCell>
 
       <TableCell>

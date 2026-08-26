@@ -2,7 +2,16 @@
 
 import { matchesMyVote, voteScore, type MyVoteFilter } from "@/lib/votes";
 import type { ListingRow } from "@/lib/queries";
-import type { FeeType, ListingStatus, PetsPolicy, Uuid } from "@/lib/types";
+import type {
+  AcPolicy,
+  DishwasherPolicy,
+  FeeType,
+  LaundryPolicy,
+  ListingStatus,
+  OutdoorSpacePolicy,
+  PetsPolicy,
+  Uuid,
+} from "@/lib/types";
 
 export type Filters = {
   rentMin: string;
@@ -13,6 +22,11 @@ export type Filters = {
   feeType: FeeType | "all";
   /** A null column reads as `unknown`, same as the select does. */
   pets: PetsPolicy | "all";
+  /** Amenities (0009). Same shape as `pets`: "all" is the any-answer default. */
+  laundry: LaundryPolicy | "all";
+  dishwasher: DishwasherPolicy | "all";
+  ac: AcPolicy | "all";
+  outdoor_space: OutdoorSpacePolicy | "all";
   /** "How did *I* vote" — resolved against the person on this device. */
   myVote: MyVoteFilter;
 };
@@ -25,6 +39,10 @@ export const EMPTY_FILTERS: Filters = {
   status: "all",
   feeType: "all",
   pets: "all",
+  laundry: "all",
+  dishwasher: "all",
+  ac: "all",
+  outdoor_space: "all",
   myVote: "all",
 };
 
@@ -37,6 +55,10 @@ export function hasActiveFilters(f: Filters): boolean {
     f.status !== "all" ||
     f.feeType !== "all" ||
     f.pets !== "all" ||
+    f.laundry !== "all" ||
+    f.dishwasher !== "all" ||
+    f.ac !== "all" ||
+    f.outdoor_space !== "all" ||
     f.myVote !== "all"
   );
 }
@@ -48,6 +70,7 @@ export type SortKey =
   | "beds"
   | "fee_type"
   | "pets"
+  | "amenities"
   | "status"
   | "broker"
   | "votes"
@@ -64,6 +87,61 @@ const PETS_RANK: Record<PetsPolicy, number> = {
   no: 3,
   unknown: 4,
 };
+
+/**
+ * Amenity ranks (0009), best-first in every case: `in_unit` beats
+ * `in_building` beats `none` beats `unknown`, and an unanswered question
+ * always sorts last rather than in the middle.
+ */
+const LAUNDRY_RANK: Record<LaundryPolicy, number> = {
+  in_unit: 0,
+  in_building: 1,
+  none: 2,
+  unknown: 3,
+};
+
+const DISHWASHER_RANK: Record<DishwasherPolicy, number> = {
+  yes: 0,
+  no: 1,
+  unknown: 2,
+};
+
+const AC_RANK: Record<AcPolicy, number> = {
+  central: 0,
+  window: 1,
+  none: 2,
+  unknown: 3,
+};
+
+const OUTDOOR_RANK: Record<OutdoorSpacePolicy, number> = {
+  private: 0,
+  shared: 1,
+  none: 2,
+  unknown: 3,
+};
+
+/**
+ * One number for the table's single "Amenities" column, lowest = best.
+ *
+ * The four ranks are packed lexicographically rather than added up, so the
+ * column has a defined tie-break instead of letting a dishwasher outvote
+ * in-unit laundry: laundry decides the order, then AC, then outdoor space,
+ * then the dishwasher. Nulls read as `unknown`, so a pre-0009 row sorts with
+ * the ones nobody has asked about.
+ */
+export function amenityRank(row: {
+  laundry?: LaundryPolicy | null;
+  dishwasher?: DishwasherPolicy | null;
+  ac?: AcPolicy | null;
+  outdoor_space?: OutdoorSpacePolicy | null;
+}): number {
+  return (
+    LAUNDRY_RANK[row.laundry ?? "unknown"] * 1000 +
+    AC_RANK[row.ac ?? "unknown"] * 100 +
+    OUTDOOR_RANK[row.outdoor_space ?? "unknown"] * 10 +
+    DISHWASHER_RANK[row.dishwasher ?? "unknown"]
+  );
+}
 
 /**
  * Which way a column sorts on its first click. Alphabetical columns read best
@@ -94,6 +172,17 @@ export function applyFilters(
     if (f.status !== "all" && r.status !== f.status) return false;
     if (f.feeType !== "all" && (r.fee_type ?? "unknown") !== f.feeType) return false;
     if (f.pets !== "all" && (r.pets ?? "unknown") !== f.pets) return false;
+    if (f.laundry !== "all" && (r.laundry ?? "unknown") !== f.laundry) return false;
+    if (f.dishwasher !== "all" && (r.dishwasher ?? "unknown") !== f.dishwasher) {
+      return false;
+    }
+    if (f.ac !== "all" && (r.ac ?? "unknown") !== f.ac) return false;
+    if (
+      f.outdoor_space !== "all" &&
+      (r.outdoor_space ?? "unknown") !== f.outdoor_space
+    ) {
+      return false;
+    }
     if (!matchesMyVote(r.votes, personId, f.myVote)) return false;
     return true;
   });
@@ -116,6 +205,11 @@ function sortValue(row: ListingRow, key: SortKey): string | number | null {
       // `unknown`, the column default, so it sorts last rather than sinking
       // as a blank.
       return PETS_RANK[row.pets ?? "unknown"];
+    case "amenities":
+      // One packed rank for four columns — see `amenityRank`. Ascending walks
+      // from the apartment with a washer in it to the one nobody has asked
+      // about, which is the direction anyone scanning this column wants.
+      return amenityRank(row);
     case "status":
       return row.status ?? null;
     case "votes":
