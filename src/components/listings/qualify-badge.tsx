@@ -24,10 +24,11 @@ export function QualifyBadge({
   const q = qualification(rent, incomeMultiplier, incomes);
   return (
     <span className={cn("flex items-center gap-1.5 whitespace-nowrap", className)}>
-      <Badge variant={q.passes ? "default" : "destructive"}>
+      {/* Mint yes / coral no, the same two colours the votes use. */}
+      <Badge className={q.passes ? "bg-yes text-ink" : "bg-no text-ink"}>
         {q.passes ? "PASS" : "FAIL"}
       </Badge>
-      <span className="text-xs text-muted-foreground">
+      <span className="text-xs text-muted-foreground tabular-nums">
         {moneyShort(q.combined)} / {moneyShort(q.required)}
       </span>
     </span>

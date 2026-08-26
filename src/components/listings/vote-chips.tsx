@@ -1,29 +1,39 @@
 "use client";
 
 /**
- * The compact read-out of a listing's votes — `✓2 ?1` — for the table column
- * and the mobile cards. Only nonzero counts are drawn, so a listing nobody has
- * looked at stays quiet; the tooltip spells out who voted what.
+ * The compact read-out of a listing's votes, for the table column and the
+ * mobile cards: one circle per person, filled with **their** colour, with the
+ * vote as a glyph inside — `Y` / `?` / `N`, and `–` for nobody-home. Four
+ * circles in a fixed order means the same person is always in the same place,
+ * so a row is scannable without reading anything.
  *
- * `VOTE_TONE` is the one place the yes/maybe/no colours are defined: the pill
+ * `VOTE_TONE` is the one place the yes/maybe/no colours are defined: the pills
  * here, the row pills in `votes-card.tsx` and that card's active toggle button
- * all read from it, so green never means two different things.
+ * all read from it, so mint never means two different things.
  */
 
+import { PersonDot } from "@/components/person-dot";
 import { usePerson } from "@/lib/person";
-import { VOTE_LABELS, VOTE_MARKS, VOTE_VALUES, voteCounts, voteTooltip } from "@/lib/votes";
+import { VOTE_LABELS, voteTooltip } from "@/lib/votes";
 import { cn } from "@/lib/utils";
 import type { VoteRow } from "@/lib/queries";
 import type { VoteValue } from "@/lib/types";
 
 export const VOTE_TONE: Record<VoteValue, string> = {
-  yes: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  maybe: "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  no: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  yes: "bg-yes text-ink border-transparent",
+  maybe: "bg-maybe text-ink border-transparent",
+  no: "bg-no text-ink border-transparent",
+};
+
+/** The glyph that goes inside a person's circle. */
+const VOTE_GLYPH: Record<VoteValue, string> = {
+  yes: "Y",
+  maybe: "?",
+  no: "N",
 };
 
 const PILL =
-  "inline-flex h-5 items-center gap-0.5 rounded-full border px-1.5 text-xs font-medium tabular-nums";
+  "inline-flex h-5 items-center gap-0.5 rounded-full border px-2 text-[11px] font-black tabular-nums";
 
 /** One person's vote, spelled out. `—` when they have not voted. */
 export function VotePill({
@@ -36,7 +46,7 @@ export function VotePill({
   if (!vote) {
     return (
       <span
-        className={cn(PILL, "border-border text-muted-foreground", className)}
+        className={cn(PILL, "border-transparent bg-inset text-faint", className)}
         aria-label="No vote"
       >
         —
@@ -44,7 +54,9 @@ export function VotePill({
     );
   }
   return (
-    <span className={cn(PILL, VOTE_TONE[vote], className)}>{VOTE_LABELS[vote]}</span>
+    <span className={cn(PILL, VOTE_TONE[vote], "uppercase", className)}>
+      {VOTE_LABELS[vote]}
+    </span>
   );
 }
 
@@ -56,29 +68,36 @@ export function VoteChips({
   className?: string;
 }) {
   const { people } = usePerson();
-  const counts = voteCounts(votes);
-
-  if (counts.total === 0) {
-    return <span className={cn("text-muted-foreground", className)}>—</span>;
-  }
+  // Same order as the votes card, so a person keeps their slot everywhere.
+  const roster = [...people].sort((a, b) => a.key.localeCompare(b.key));
+  if (roster.length === 0) return null;
 
   const title = voteTooltip(votes, (id) => people.find((p) => p.id === id)?.name);
-  const label = VOTE_VALUES.filter((v) => counts[v] > 0)
-    .map((v) => `${counts[v]} ${VOTE_LABELS[v].toLowerCase()}`)
+  const label = roster
+    .map((who) => {
+      const v = votes?.find((row) => row.person_id === who.id)?.vote;
+      return `${who.name}: ${v ? VOTE_LABELS[v].toLowerCase() : "no vote"}`;
+    })
     .join(", ");
 
   return (
     <span
       className={cn("inline-flex items-center gap-1", className)}
-      title={title}
+      title={title || undefined}
       aria-label={label}
     >
-      {VOTE_VALUES.filter((v) => counts[v] > 0).map((v) => (
-        <span key={v} className={cn(PILL, VOTE_TONE[v])} aria-hidden>
-          {VOTE_MARKS[v]}
-          {counts[v]}
-        </span>
-      ))}
+      {roster.map((who) => {
+        const vote = votes?.find((row) => row.person_id === who.id)?.vote ?? null;
+        return (
+          <PersonDot
+            key={who.id}
+            person={who}
+            size="lg"
+            letter={vote ? VOTE_GLYPH[vote] : "–"}
+            className={cn(!vote && "opacity-45")}
+          />
+        );
+      })}
     </span>
   );
 }

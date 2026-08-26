@@ -52,11 +52,11 @@ export default function ListingsPage() {
       {isPending ? (
         <div className="grid gap-2">
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-14 w-full" />
+            <Skeleton key={i} className="h-20 w-full rounded-[20px]" />
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border-2 border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           {listings.length === 0
             ? "Nothing here yet. Add the first listing."
             : "No listings match these filters."}

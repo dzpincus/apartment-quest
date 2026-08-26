@@ -80,7 +80,7 @@ function ListingDetailView({
   return (
     <div className="space-y-4">
       {listing.merged_into && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+        <div className="rounded-2xl border-2 border-due/50 bg-due/10 p-3 text-sm">
           Merged into{" "}
           <Link
             href={`/listings/${listing.merged_into}`}
@@ -94,7 +94,12 @@ function ListingDetailView({
         </div>
       )}
 
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      {/* The rule under the header is the colour of whoever found this, with
+          the credit line to decode it — same rule as the listing cards. */}
+      <div
+        className="flex flex-wrap items-start justify-between gap-2 border-b-2 pb-3"
+        style={{ borderColor: listing.added_by_person?.color ?? "#888" }}
+      >
         <div className="min-w-0">
           <Link
             href="/listings"
@@ -102,7 +107,18 @@ function ListingDetailView({
           >
             ← Listings
           </Link>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
+          <p className="mt-1 flex items-center gap-2 text-xs font-extrabold">
+            <PersonDot
+              person={listing.added_by_person}
+              withName={false}
+              size="md"
+            />
+            <span style={{ color: listing.added_by_person?.color ?? undefined }}>
+              {listing.added_by_person?.name ?? "Someone"} found this ·{" "}
+              {listing.created_at ? fmtNY(listing.created_at, "MMM d") : "—"}
+            </span>
+          </p>
+          <h1 className="flex items-center gap-2 text-[26px] leading-tight md:text-2xl">
             <span className="truncate">
               {listingLabel(listing.address, listing.unit)}
             </span>
@@ -111,9 +127,7 @@ function ListingDetailView({
           </h1>
           <p className="text-sm text-muted-foreground">
             {listing.neighborhood ?? "No neighborhood"} ·{" "}
-            {listing.rent == null ? "no rent" : `${money(listing.rent)}/mo`} · added{" "}
-            {listing.created_at ? fmtNY(listing.created_at, "MMM d") : "—"} by{" "}
-            {listing.added_by_person?.name ?? "someone"}
+            {listing.rent == null ? "no rent" : `${money(listing.rent)}/mo`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -294,7 +308,7 @@ function ListingDetailView({
             </DetailField>
           </dl>
 
-          <div className="mt-3 border-t pt-3">
+          <div className="mt-3 border-t border-border pt-3">
             <p className="mb-1 text-sm text-muted-foreground">Notes</p>
             <InlineEdit
               label="notes"
@@ -337,7 +351,7 @@ function DetailField({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[7.5rem_1fr] items-center gap-2 border-b py-1.5 last:border-0 md:border-b">
+    <div className="grid grid-cols-[7.5rem_1fr] items-center gap-2 border-b border-border py-1.5 last:border-0 md:border-b">
       <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className="min-w-0 text-sm">{children}</dd>
     </div>

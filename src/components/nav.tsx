@@ -28,7 +28,7 @@ function DueBadge({ count, className }: { count: number; className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-medium tabular-nums text-white",
+        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-urgent px-1 text-[10px] font-black tabular-nums text-ink",
         className,
       )}
       aria-label={`${count} needing follow-up`}
@@ -57,9 +57,24 @@ function LogoutButton({ className }: { className?: string }) {
   );
 }
 
+/** The person chip: dot in their colour, name, on a bordered pill. */
+function PersonPill() {
+  const { person } = usePerson();
+  if (!person) return null;
+  return (
+    <span className="flex items-center gap-1.5 rounded-full border-2 border-border bg-card py-1 pr-3 pl-1.5 text-[13px] font-extrabold">
+      <span
+        className="size-4.5 rounded-full"
+        style={{ backgroundColor: person.color ?? "#888" }}
+        aria-hidden
+      />
+      {person.name}
+    </span>
+  );
+}
+
 export function Nav() {
   const pathname = usePathname();
-  const { person } = usePerson();
   // Overdue + due today. Reads the shared listings cache, so this costs no
   // extra request beyond the one the home screen already makes.
   const { buckets } = useQueue();
@@ -70,16 +85,19 @@ export function Nav() {
   return (
     <>
       {/* Desktop: top bar */}
-      <header className="sticky top-0 z-40 hidden border-b bg-background/95 backdrop-blur md:block">
+      <header className="sticky top-0 z-40 hidden border-b border-border bg-card/90 backdrop-blur md:block">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-1 px-4">
-          <span className="mr-4 font-semibold">Apartment Quest</span>
+          <Link href="/" className="mr-4 text-lg font-black tracking-tight">
+            Apartment Quest
+          </Link>
           {TABS.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-muted-foreground hover:text-foreground",
-                isActive(pathname, href) && "bg-muted font-medium text-foreground",
+                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-extrabold text-muted-foreground hover:bg-secondary hover:text-foreground",
+                isActive(pathname, href) &&
+                  "bg-primary text-ink hover:bg-primary hover:text-ink",
               )}
             >
               {label}
@@ -88,59 +106,49 @@ export function Nav() {
             </Link>
           ))}
           <div className="ml-auto flex items-center gap-2">
-            {person && (
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span
-                  className="size-2.5 rounded-full"
-                  style={{ backgroundColor: person.color ?? "#888" }}
-                />
-                {person.name}
-              </span>
-            )}
+            <PersonPill />
             <LogoutButton />
           </div>
         </div>
       </header>
 
-      {/* Mobile: title row + bottom tab bar */}
-      <header className="sticky top-0 z-40 flex h-12 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:hidden">
-        <span className="font-semibold">Apartment Quest</span>
-        <div className="flex items-center gap-1">
-          {person && (
-            <span
-              className="size-2.5 rounded-full"
-              style={{ backgroundColor: person.color ?? "#888" }}
-            />
-          )}
-          <LogoutButton />
-        </div>
+      {/* Mobile: the page owns its own big title (see the design), so this row
+          carries only who you are and the way out. */}
+      <header className="sticky top-0 z-40 flex h-12 items-center justify-end gap-1 px-4 md:hidden">
+        <PersonPill />
+        <LogoutButton />
       </header>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t bg-background pb-[env(safe-area-inset-bottom)] md:hidden">
-        {TABS.map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              "flex flex-col items-center gap-0.5 py-2 text-xs text-muted-foreground",
-              isActive(pathname, href) && "text-foreground",
-            )}
-          >
-            <span className="relative">
-              <Icon className="size-5" />
-              {href === "/" && due > 0 && (
-                <DueBadge count={due} className="absolute -top-1.5 -right-2.5" />
+      {/* Mobile: floating pill tab bar. */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 mx-4 mb-[max(1.25rem,env(safe-area-inset-bottom))] grid grid-cols-4 rounded-full border-2 border-border bg-card p-2 shadow-[0_6px_0_rgba(0,0,0,0.25)] md:hidden">
+        {TABS.map(({ href, label, icon: Icon }) => {
+          const active = isActive(pathname, href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex flex-col items-center gap-0.5 rounded-full py-1.5 text-[10px] font-extrabold text-muted-foreground",
+                active && "bg-primary text-ink",
               )}
-              {href === "/chat" && (
-                <UnreadBadge
-                  count={unreadChat}
-                  className="absolute -top-1.5 -right-2.5"
-                />
-              )}
-            </span>
-            {label}
-          </Link>
-        ))}
+            >
+              <span className="relative">
+                <Icon className="size-5" strokeWidth={2.5} />
+                {href === "/" && due > 0 && (
+                  <DueBadge count={due} className="absolute -top-1.5 -right-2.5" />
+                )}
+                {href === "/chat" && (
+                  <UnreadBadge
+                    count={unreadChat}
+                    className="absolute -top-1.5 -right-2.5"
+                  />
+                )}
+              </span>
+              {label}
+            </Link>
+          );
+        })}
       </nav>
     </>
   );

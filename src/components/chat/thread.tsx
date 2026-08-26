@@ -122,16 +122,11 @@ export function Thread({
   }
 
   return (
-    <div
-      className={cn(
-        "relative flex min-h-0 flex-col overflow-hidden rounded-lg border",
-        className,
-      )}
-    >
+    <div className={cn("relative flex min-h-0 flex-col overflow-hidden", className)}>
       <div
         ref={listRef}
         onScroll={onScroll}
-        className="flex-1 space-y-3 overflow-y-auto overscroll-contain p-3"
+        className="flex-1 space-y-3 overflow-y-auto overscroll-contain px-1 py-2"
       >
         {isPending && <Skeleton className="h-20 w-full" />}
         {error && (
@@ -149,38 +144,57 @@ export function Thread({
         {groups.map((group) => {
           const first = group.items[0];
           const mine = group.personId === person?.id;
-          return (
-            <div
-              key={group.key}
-              className="grid gap-1 border-l-2 pl-3"
-              style={{ borderColor: first.person?.color ?? "#888" }}
-            >
-              <div className="flex items-baseline gap-2">
-                <PersonDot
-                  person={first.person}
-                  withName
-                  className="text-sm font-medium"
-                />
-                <span className="text-xs tabular-nums text-muted-foreground">
+          const color = first.person?.color ?? "#888";
+
+          if (mine) {
+            return (
+              <div key={group.key} className="flex flex-col items-end gap-1">
+                {group.items.map((message) => (
+                  <p
+                    key={message.id}
+                    title={
+                      message.created_at
+                        ? fmtNY(message.created_at, "MMM d, h:mm a")
+                        : undefined
+                    }
+                    className="w-fit max-w-[85%] rounded-[18px] rounded-br-[4px] px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap text-ink"
+                    style={{ backgroundColor: color }}
+                  >
+                    {message.body}
+                  </p>
+                ))}
+                <span className="pr-1 text-[10px] tabular-nums text-faint">
                   {group.startedAt ? fmtNY(group.startedAt, "MMM d, h:mm a") : ""}
                 </span>
               </div>
-              {group.items.map((message) => (
-                <p
-                  key={message.id}
-                  title={
-                    message.created_at
-                      ? fmtNY(message.created_at, "MMM d, h:mm a")
-                      : undefined
-                  }
-                  className={cn(
-                    "w-fit max-w-[85%] rounded-lg px-2.5 py-1.5 text-sm break-words whitespace-pre-wrap",
-                    mine ? "bg-primary/10" : "bg-muted",
-                  )}
-                >
-                  {message.body}
-                </p>
-              ))}
+            );
+          }
+
+          return (
+            <div key={group.key} className="flex items-end gap-2">
+              <PersonDot person={first.person} size="lg" className="mb-5" />
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="text-[11px] font-extrabold" style={{ color }}>
+                  {first.person?.name ?? "Someone"}
+                </span>
+                {group.items.map((message) => (
+                  <p
+                    key={message.id}
+                    title={
+                      message.created_at
+                        ? fmtNY(message.created_at, "MMM d, h:mm a")
+                        : undefined
+                    }
+                    className="w-fit max-w-[85%] rounded-[18px] rounded-bl-[4px] border-2 bg-card px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap"
+                    style={{ borderColor: color }}
+                  >
+                    {message.body}
+                  </p>
+                ))}
+                <span className="text-[10px] tabular-nums text-faint">
+                  {group.startedAt ? fmtNY(group.startedAt, "MMM d, h:mm a") : ""}
+                </span>
+              </div>
             </div>
           );
         })}
@@ -190,7 +204,7 @@ export function Thread({
         <Button
           size="sm"
           variant="secondary"
-          className="absolute bottom-16 left-1/2 -translate-x-1/2 shadow-md"
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 shadow-lg"
           onClick={() => scrollToBottom()}
         >
           New messages
@@ -199,7 +213,7 @@ export function Thread({
       )}
 
       <form
-        className="flex items-end gap-2 border-t bg-background p-2"
+        className="flex items-end gap-2 pt-2"
         onSubmit={(event) => {
           event.preventDefault();
           send();
@@ -224,9 +238,15 @@ export function Thread({
           placeholder={listingId ? "Message about this listing…" : "Message…"}
           aria-label="Message"
           disabled={!person}
-          className="max-h-32 min-h-9 resize-none py-1.5"
+          className="max-h-32 min-h-11 resize-none rounded-[22px] border-2 bg-card px-4 py-2.5"
         />
-        <Button type="submit" size="icon" disabled={!canSend} aria-label="Send">
+        <Button
+          type="submit"
+          size="icon-lg"
+          disabled={!canSend}
+          aria-label="Send"
+          className="shrink-0"
+        >
           <SendHorizontal />
         </Button>
       </form>

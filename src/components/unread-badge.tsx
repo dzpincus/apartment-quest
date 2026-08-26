@@ -16,7 +16,7 @@ export function UnreadBadge({
   return (
     <span
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium tabular-nums text-primary-foreground",
+        "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-black tabular-nums text-primary-foreground",
         className,
       )}
       aria-label={`${count} unread message${count === 1 ? "" : "s"}`}

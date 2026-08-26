@@ -119,6 +119,29 @@ export function bucketListings<T extends QueueFields>(
   return out;
 }
 
+const SMALL_NUMBERS = [
+  "Nothing",
+  "One",
+  "Two",
+  "Three",
+  "Four",
+  "Five",
+  "Six",
+  "Seven",
+  "Eight",
+  "Nine",
+] as const;
+
+/**
+ * The home screen's one line of copy, driven by `needsAttentionCount`. Pure so
+ * the number and the words can never disagree.
+ */
+export function queueSubtitle(count: number): string {
+  if (count <= 0) return "Nothing on fire. Go touch grass.";
+  const n = count < SMALL_NUMBERS.length ? SMALL_NUMBERS[count] : String(count);
+  return `${n} thing${count === 1 ? "" : "s"} to poke at today.`;
+}
+
 /** Overdue + today: the number that belongs on the Home tab (SPEC: one badge). */
 export function needsAttentionCount<T>(buckets: Buckets<T>): number {
   return buckets.overdue.length + buckets.today.length;

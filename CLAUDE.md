@@ -83,6 +83,53 @@ Run `pnpm lint && pnpm build && pnpm test` before every commit.
 Vercel, `main` branch. Set the three env vars in the Vercel project settings for
 Production and Preview.
 
+## Design system — "Dusk Candy"
+
+**Dark only.** There is no light mode, no theme switcher and no `next-themes`
+provider. `<html>` carries a permanent `dark` class (so the shadcn primitives'
+`dark:` branches are the ones that apply) and every token is defined once in
+`:root` in `src/app/globals.css`. The `.dark` block is gone — adding one back
+would be a second source of truth.
+
+| Role | Value | Token / utility |
+|---|---|---|
+| Page | `linear-gradient(180deg,#23204a,#1a1836)` fixed on `body`, flat `#1e1b40` fallback | `--background` |
+| Text | `#f2efff` / muted `#b3aee0` / faint `#8b86bd` | `--foreground`, `--muted-foreground`, `text-faint` |
+| Card | `#2f2b5e` | `--card` |
+| Inset (panel on a card, table header) | `#26235a` | `bg-inset` |
+| Row hover | `#34306a` | `hover:bg-surface-hover` |
+| Border / secondary button | `#3c3778` | `--border`, `--secondary` |
+| Primary | `#ffd56b` on `#1a1836` | `--primary`, `text-ink` |
+| Urgency | overdue `#ff7f9f` / today `#ffd56b` / quiet `#8ed8ff` | `--urgent`, `--due`, `--quiet` |
+| Votes | yes `#9df0b5` / maybe `#ffd56b` / no `#ff7f9f` | `--yes`, `--maybe`, `--no` |
+
+`--radius` is `1rem`, so `rounded-xl` (what `Card` uses) is 22px; chips and
+buttons are `rounded-full`. Font is **Nunito** 600/800/900 via `next/font/google`
+— body 600, chips/labels 800, headings 900 at `-0.02em`. `--font-sans` in
+`@theme inline` must name `var(--font-nunito)` explicitly: it used to be
+`var(--font-sans)`, which referred to itself, and the font was never applied.
+
+Contrast rule: `--muted-foreground` (`#b3aee0`) is fine on card and on inset;
+`text-faint` (`#8b86bd`) is decoration only and must never carry anything
+important on `bg-inset`.
+
+- **Person colour is data, never a literal.** The four people's hexes live in
+  `people.color` (`supabase/seed.sql`) and reach the screen only as an inline
+  `style` — no component hardcodes a person's hex, so a fifth housemate is a row,
+  not a patch. `PersonDot` (`src/components/person-dot.tsx`) is the single
+  source: `person`, `size`, `withName`, `colorName`, and `letter` for the
+  glyph-in-a-circle used by the vote chips. Colour identifies a person in nine
+  places — listing card borders and rent, the table's 3px left rail, the detail
+  header rule + "found this" line, queue owners, vote rows, the four vote
+  circles, chat bubbles, the activity feed, and the person gate. Anything
+  coloured that is *not* a person (urgency, votes, qualification) comes from the
+  semantic tokens above, never from `people.color`.
+- **Chunky buttons.** The primary variant carries `shadow-[0_4px_0_var(--primary-shadow)]`
+  and compresses to `0_2px_0` on `:active`, so the base's `active:translate-y-px`
+  reads as a press rather than a slide. The Yes vote button is the same trick in
+  mint (`--yes-shadow`). Only these two: a chunky lip on every button is noise.
+- Emoji are allowed in copy, sparingly. Icons are lucide, always.
+
 ## Architectural rules
 
 - **All writes go through `src/lib/mutations.ts`.** Every mutation writes its row

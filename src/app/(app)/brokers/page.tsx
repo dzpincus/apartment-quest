@@ -31,8 +31,8 @@ export default function BrokersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold">Brokers</h1>
-        <span className="text-sm text-muted-foreground">{brokers.length}</span>
+        <h1 className="text-[26px] leading-tight md:text-2xl">Brokers</h1>
+        <span className="text-sm text-muted-foreground tabular-nums">{brokers.length}</span>
         <div className="ml-auto">
           <AddBrokerDialog />
         </div>
@@ -41,7 +41,7 @@ export default function BrokersPage() {
       {isPending ? (
         <Skeleton className="h-24 w-full" />
       ) : brokers.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border-2 border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           No brokers yet. Add one, or create one while adding a listing.
         </p>
       ) : (
@@ -102,10 +102,10 @@ export default function BrokersPage() {
 
 function BrokerCardRow({ broker, count }: { broker: Broker; count: number }) {
   return (
-    <Card className="gap-1.5 p-3 text-sm">
+    <Card className="gap-1.5 p-3.5 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate font-medium">{broker.name}</p>
+          <p className="truncate font-black">{broker.name}</p>
           {broker.company && (
             <p className="truncate text-xs text-muted-foreground">{broker.company}</p>
           )}

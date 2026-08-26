@@ -66,7 +66,9 @@ export function IncomesPopover() {
             <div key={p.id} className="grid grid-cols-[1fr_7rem] items-center gap-2">
               <Label
                 htmlFor={`income-${p.id}`}
-                className="gap-1.5 text-sm font-normal"
+                className="gap-2 rounded-full px-2 py-1 text-sm font-extrabold"
+                // Their colour, tinted, so the row is theirs at a glance.
+                style={{ backgroundColor: `${p.color ?? "#888"}1f` }}
               >
                 <span
                   className="size-2.5 rounded-full"
@@ -94,9 +96,9 @@ export function IncomesPopover() {
           ))}
         </div>
 
-        <div className="flex items-center justify-between border-t pt-2 text-sm">
+        <div className="flex items-center justify-between border-t border-border pt-2 text-sm">
           <span className="text-muted-foreground">Combined</span>
-          <span className="font-medium">{money(combined)}</span>
+          <span className="font-black tabular-nums">{money(combined)}</span>
         </div>
       </PopoverContent>
     </Popover>

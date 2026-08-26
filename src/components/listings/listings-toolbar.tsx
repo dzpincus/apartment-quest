@@ -2,6 +2,8 @@
 
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PersonDot } from "@/components/person-dot";
+import { usePerson } from "@/lib/person";
 import { Input } from "@/components/ui/input";
 import { SimpleSelect, type SelectOption } from "@/components/simple-select";
 import { AddListingDialog } from "@/components/listings/add-listing-dialog";
@@ -61,6 +63,8 @@ export function ListingsToolbar({
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     onFiltersChange({ ...filters, [key]: value });
 
+  const { people } = usePerson();
+
   const hoods: SelectOption[] = [
     { value: "all", label: "Any neighborhood" },
     ...neighborhoodOptions.map((n) => ({ value: n, label: n })),
@@ -69,12 +73,22 @@ export function ListingsToolbar({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold">Listings</h1>
-        <span className="text-sm text-muted-foreground">{count}</span>
+        <h1 className="text-[26px] leading-tight md:text-2xl">Listings</h1>
+        <span className="text-sm text-muted-foreground tabular-nums">{count}</span>
         <div className="ml-auto flex items-center gap-2">
           <IncomesPopover />
           <AddListingDialog />
         </div>
+      </div>
+
+      {/* The cards below are bordered by whoever found the listing; without
+          this the colour is decoration nobody can decode. The desktop table
+          says "By" in its own column, so the legend is mobile-only. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-extrabold text-faint md:hidden">
+        <span>Border = who found it</span>
+        {people.map((p) => (
+          <PersonDot key={p.id} person={p} withName className="gap-1" />
+        ))}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

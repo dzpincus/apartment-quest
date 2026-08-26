@@ -90,20 +90,28 @@ function VoteRowView({
   onClear: () => void;
 }) {
   return (
-    <div className="grid gap-1.5 border-b pb-3 last:border-0 last:pb-0">
+    <div className="grid gap-1.5 border-b border-border pb-3 last:border-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
-        <PersonDot person={who} withName className="min-w-24 text-sm font-medium" />
+        <PersonDot person={who} withName className="min-w-24 text-sm font-extrabold" />
         {isMe ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             {VOTE_VALUES.map((value) => {
               const active = vote?.vote === value;
               return (
                 <Button
                   key={value}
-                  size="xs"
-                  variant="outline"
+                  size="sm"
+                  variant="secondary"
                   aria-pressed={active}
-                  className={cn(active && VOTE_TONE[value])}
+                  className={cn(
+                    "font-black",
+                    active && VOTE_TONE[value],
+                    // Yes gets the chunky lip, in its own darker mint — this is
+                    // the button the whole widget exists for.
+                    active &&
+                      value === "yes" &&
+                      "shadow-[0_4px_0_var(--yes-shadow)] active:shadow-[0_2px_0_var(--yes-shadow)]",
+                  )}
                   onClick={() => {
                     if (!active) onCast(value, vote?.comment ?? null);
                   }}
@@ -113,12 +121,7 @@ function VoteRowView({
               );
             })}
             {vote && (
-              <Button
-                size="xs"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={onClear}
-              >
+              <Button size="sm" variant="ghost" onClick={onClear}>
                 Clear
               </Button>
             )}

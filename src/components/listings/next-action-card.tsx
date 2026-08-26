@@ -23,8 +23,22 @@ export function NextActionCard({ listing }: { listing: ListingRow }) {
   const [editing, setEditing] = useState(false);
   const today = todayNY();
 
+  // Same three colours the queue buckets use: coral late, yellow now, and
+  // nothing at all when the plan is comfortably in the future.
+  const due = listing.next_action_due;
+  const tone = !due
+    ? null
+    : due < today
+      ? "var(--urgent)"
+      : due === today
+        ? "var(--due)"
+        : null;
+
   return (
-    <Card>
+    <Card
+      className={tone ? "border-2" : undefined}
+      style={tone ? { borderColor: tone } : undefined}
+    >
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle>Next action</CardTitle>
@@ -71,7 +85,12 @@ export function NextActionCard({ listing }: { listing: ListingRow }) {
               {listing.next_action_due && (
                 <span>
                   Due {fmtDay(listing.next_action_due, "MMM d, yyyy")} ·{" "}
-                  {dueHint(listing.next_action_due, today)}
+                  <span
+                    className="font-extrabold"
+                    style={tone ? { color: tone } : undefined}
+                  >
+                    {dueHint(listing.next_action_due, today)}
+                  </span>
                 </span>
               )}
               {listing.next_action_owner_person && (

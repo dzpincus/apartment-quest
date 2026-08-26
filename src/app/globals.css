@@ -4,12 +4,33 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * "Dusk Candy" — the app is dark only. There is no light mode and no theme
+ * switcher: every token below is the dark value, `.dark` is still set on <html>
+ * so the shadcn primitives' `dark:` branches (written for a dark surface) are
+ * the ones that apply.
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  /* Was `var(--font-sans)`, which referred to itself and resolved to nothing —
+     the font next/font loaded was never actually applied. */
+  --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
+
+  /* App-specific surfaces and semantic colours, as utilities. */
+  --color-inset: var(--inset);
+  --color-surface-hover: var(--surface-hover);
+  --color-faint: var(--faint);
+  --color-ink: var(--ink);
+  --color-urgent: var(--urgent);
+  --color-due: var(--due);
+  --color-quiet: var(--quiet);
+  --color-yes: var(--yes);
+  --color-maybe: var(--maybe);
+  --color-no: var(--no);
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,72 +70,70 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
+  color-scheme: dark;
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Page. The gradient lives on <body>; this is the flat fallback. */
+  --background: #1e1b40;
+  --foreground: #f2efff;
+
+  /* Surfaces: card, then the nested/inset panel that sits on a card. */
+  --card: #2f2b5e;
+  --card-foreground: #f2efff;
+  --popover: #2f2b5e;
+  --popover-foreground: #f2efff;
+  --inset: #26235a;
+  --surface-hover: #34306a;
+
+  /* Yellow is the one loud thing on the screen. `--primary-shadow` is the
+     chunky 4px lip under every primary button. */
+  --primary: #ffd56b;
+  --primary-foreground: #1a1836;
+  --primary-shadow: #c9a44a;
+
+  --secondary: #3c3778;
+  --secondary-foreground: #f2efff;
+  --accent: #3c3778;
+  --accent-foreground: #f2efff;
+
+  --muted: #26235a;
+  --muted-foreground: #b3aee0;
+  /* Decoration only. Never put this on --inset: it fails contrast there. */
+  --faint: #8b86bd;
+  /* Text on any bright fill (primary, vote pills, person dots). */
+  --ink: #1a1836;
+
+  --destructive: #ff7f9f;
+  --border: #3c3778;
+  --input: #3c3778;
+  --ring: #ffd56b;
+
+  /* Urgency. Coral is late, yellow is now, blue is quiet. */
+  --urgent: #ff7f9f;
+  --due: #ffd56b;
+  --quiet: #8ed8ff;
+
+  /* Votes. `--yes-shadow` is the chunky lip under the Yes button. */
+  --yes: #9df0b5;
+  --yes-shadow: #6fbf88;
+  --maybe: #ffd56b;
+  --no: #ff7f9f;
+
+  --chart-1: #ffd56b;
+  --chart-2: #ff9ecf;
+  --chart-3: #9df0b5;
+  --chart-4: #c4a8ff;
+  --chart-5: #8ed8ff;
+
+  --radius: 1rem;
+
+  --sidebar: #2f2b5e;
+  --sidebar-foreground: #f2efff;
+  --sidebar-primary: #ffd56b;
+  --sidebar-primary-foreground: #1a1836;
+  --sidebar-accent: #3c3778;
+  --sidebar-accent-foreground: #f2efff;
+  --sidebar-border: #3c3778;
+  --sidebar-ring: #ffd56b;
 }
 
 @layer base {
@@ -122,9 +141,21 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    /* Flat colour first so a failed gradient is still dark, not white. */
+    background-color: var(--background);
+    background-image: linear-gradient(180deg, #23204a 0%, #1a1836 100%);
+    background-attachment: fixed;
+    min-height: 100dvh;
+    font-weight: 600;
   }
   html {
     @apply font-sans;
+  }
+  h1,
+  h2,
+  h3 {
+    font-weight: 900;
+    letter-spacing: -0.02em;
   }
 }

@@ -37,7 +37,7 @@ export function ActivityFeed({ limit = 50 }: { limit?: number }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Activity</CardTitle>
+        <CardTitle>Lately</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4">
         {isPending && <Skeleton className="h-24 w-full" />}
@@ -58,7 +58,12 @@ export function ActivityFeed({ limit = 50 }: { limit?: number }) {
             className="border-l-2 pl-3"
             style={{ borderColor: group.person?.color ?? "#888" }}
           >
-            <PersonDot person={group.person} withName className="text-sm font-medium" />
+            <PersonDot
+              person={group.person}
+              withName
+              colorName
+              className="text-sm font-extrabold"
+            />
             <ul className="mt-1 grid gap-1">
               {group.items.map((item) => (
                 <li

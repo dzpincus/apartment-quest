@@ -39,8 +39,16 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="w-full max-w-xs space-y-4">
-        <h1 className="text-xl font-semibold">Apartment Quest</h1>
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-sm space-y-5 rounded-[24px] border-2 border-border bg-card p-6"
+      >
+        <div className="space-y-1">
+          <h1 className="text-[28px] leading-tight">Apartment Quest</h1>
+          <p className="text-sm text-muted-foreground">
+            Four people, one lease. Password, please.
+          </p>
+        </div>
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <Input
@@ -49,6 +57,7 @@ export default function LoginPage() {
             type="password"
             autoComplete="current-password"
             autoFocus
+            className="h-11 rounded-full bg-inset px-4"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -58,7 +67,12 @@ export default function LoginPage() {
             {error}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={pending || !password}>
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full"
+          disabled={pending || !password}
+        >
           {pending ? "Checking..." : "Enter"}
         </Button>
       </form>

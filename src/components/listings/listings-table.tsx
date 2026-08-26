@@ -121,7 +121,11 @@ function Row({
   const save = useRowEdit(row);
 
   return (
-    <TableRow>
+    // 3px left rail in the colour of whoever found it — the desktop version of
+    // the mobile card's border. Legend lives in the toolbar.
+    <TableRow
+      style={{ borderLeft: `3px solid ${row.added_by_person?.color ?? "#888"}` }}
+    >
       <TableCell className="max-w-56">
         <span className="flex items-center gap-1.5">
           <Link

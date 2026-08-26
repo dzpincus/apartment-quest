@@ -24,7 +24,7 @@ export default async function AppLayout({
       <RealtimeProvider>
         <PersonProvider>
           <Nav />
-          <main className="mx-auto w-full max-w-5xl px-4 pt-4 pb-24 md:pb-8">
+          <main className="mx-auto w-full max-w-5xl px-4 pt-2 pb-32 md:pt-4 md:pb-8">
             {children}
           </main>
         </PersonProvider>

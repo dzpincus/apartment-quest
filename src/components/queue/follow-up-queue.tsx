@@ -4,47 +4,43 @@
  * Home is the follow-up queue, not a listing gallery (SPEC). Three buckets,
  * always all three, each with its count — an empty Overdue section is the point
  * of the screen, not something to hide.
+ *
+ * Each bucket owns one colour (coral late / yellow now / blue quiet), used for
+ * the header chip and for the border of every card under it.
  */
 
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueueRow } from "@/components/queue/queue-row";
 import { useQueue } from "@/components/queue/use-queue";
 import type { QueueBucket } from "@/lib/queue";
 import type { ListingRow } from "@/lib/queries";
-import { cn } from "@/lib/utils";
 
 const SECTIONS: ReadonlyArray<{
   bucket: QueueBucket;
   title: string;
   empty: string;
-  dot: string;
-  rail: string;
-  badge: string;
+  /** CSS colour token; also the border of the cards in this bucket. */
+  tone: string;
+  note?: string;
 }> = [
   {
     bucket: "overdue",
     title: "Overdue",
-    empty: "Nothing overdue 🎉",
-    dot: "bg-red-500",
-    rail: "border-l-red-500/60",
-    badge: "bg-red-500/15 text-red-600 dark:text-red-400",
+    empty: "Nothing overdue. Heroes.",
+    tone: "var(--urgent)",
   },
   {
     bucket: "today",
     title: "Today",
     empty: "Nothing due today.",
-    dot: "bg-amber-500",
-    rail: "border-l-amber-500/60",
-    badge: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    tone: "var(--due)",
   },
   {
     bucket: "cold",
-    title: "Cold",
-    empty: "Nothing has gone quiet.",
-    dot: "bg-sky-500",
-    rail: "border-l-sky-500/60",
-    badge: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+    title: "Gone quiet",
+    empty: "nobody's ghosting you",
+    tone: "var(--quiet)",
+    note: "contacted, quiet 24h+, no next step",
   },
 ];
 
@@ -64,37 +60,40 @@ export function FollowUpQueue() {
       {SECTIONS.map((section) => {
         const rows: ListingRow[] = buckets[section.bucket];
         return (
-          <section key={section.bucket} className="grid gap-2">
-            <div className="flex items-center gap-2">
-              <span className={cn("size-2.5 rounded-full", section.dot)} aria-hidden />
-              <h2 className="font-medium">{section.title}</h2>
-              <Badge className={cn("tabular-nums", section.badge)}>
-                {isPending ? "—" : rows.length}
-              </Badge>
-              {section.bucket === "cold" && (
-                <span className="text-xs text-muted-foreground">
-                  contacted, quiet 24h+, no next step
-                </span>
+          <section key={section.bucket} className="grid gap-2.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h2
+                className="rounded-full px-2.5 py-1 text-xs font-black tracking-wide text-ink uppercase"
+                style={{ backgroundColor: section.tone }}
+              >
+                {section.title} · {isPending ? "—" : rows.length}
+              </h2>
+              {section.note && (
+                <span className="text-xs text-muted-foreground">{section.note}</span>
+              )}
+              {!isPending && rows.length === 0 && (
+                <span className="ml-auto text-[13px] text-faint">{section.empty}</span>
               )}
             </div>
 
-            <div className={cn("grid gap-2 border-l-2 pl-3", section.rail)}>
-              {isPending ? (
-                <Skeleton className="h-16 w-full" />
-              ) : rows.length === 0 ? (
-                <p className="py-1 text-sm text-muted-foreground">{section.empty}</p>
-              ) : (
-                rows.map((row) => (
-                  <QueueRow
-                    key={row.id}
-                    row={row}
-                    bucket={section.bucket}
-                    today={today}
-                    now={now}
-                  />
-                ))
-              )}
-            </div>
+            {isPending ? (
+              <Skeleton className="h-24 w-full rounded-[20px]" />
+            ) : (
+              rows.length > 0 && (
+                <div className="grid gap-3">
+                  {rows.map((row) => (
+                    <QueueRow
+                      key={row.id}
+                      row={row}
+                      bucket={section.bucket}
+                      tone={section.tone}
+                      today={today}
+                      now={now}
+                    />
+                  ))}
+                </div>
+              )
+            )}
           </section>
         );
       })}

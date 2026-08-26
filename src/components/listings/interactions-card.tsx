@@ -37,7 +37,10 @@ export function InteractionsCard({ listing }: { listing: ListingRow }) {
         )}
 
         {interactions?.map((row) => (
-          <div key={row.id} className="grid gap-1 border-b pb-2 last:border-0 last:pb-0">
+          <div
+            key={row.id}
+            className="grid gap-1 border-b border-border pb-2 last:border-0 last:pb-0"
+          >
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline">
                 {INTERACTION_KIND_LABELS[row.kind ?? "note"]}

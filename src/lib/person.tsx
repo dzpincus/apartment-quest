@@ -128,15 +128,17 @@ export function PersonProvider({ children }: { children: React.ReactNode }) {
               <Button
                 key={p.id}
                 variant="outline"
-                className="h-11 w-full justify-start gap-3 text-base"
+                className="h-12 w-full justify-start gap-3 text-base"
+                // Tinted with their own colour — the same colour that will
+                // border everything they add from here on.
                 style={{
                   borderColor: p.color ?? undefined,
-                  backgroundColor: `${p.color ?? "#888"}14`,
+                  backgroundColor: `${p.color ?? "#888"}1f`,
                 }}
                 onClick={() => setPersonId(p.id)}
               >
                 <span
-                  className="size-3 rounded-full"
+                  className="size-4 rounded-full"
                   style={{ backgroundColor: p.color ?? "#888" }}
                 />
                 {p.name}
