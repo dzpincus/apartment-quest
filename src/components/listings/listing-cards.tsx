@@ -8,6 +8,7 @@ import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { PetsMark } from "@/components/listings/pets-mark";
+import { ListingThumb } from "@/components/listings/listing-thumb";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { FEE_TYPE_LABELS, bedsBaths, listingLabel, money } from "@/lib/format";
 
@@ -41,7 +42,12 @@ export function ListingCards({
               href={`/listings/${row.id}`}
               className="flex items-start justify-between gap-2"
             >
-              <span className="min-w-0">
+              <ListingThumb
+                photo={row.photos?.[0]}
+                alt=""
+                className="size-16 self-center"
+              />
+              <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-[17px] font-black">
                   <span className="truncate">{listingLabel(row.address, row.unit)}</span>
                   <UnreadBadge count={unread.byListing[row.id] ?? 0} />

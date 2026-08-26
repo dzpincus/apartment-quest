@@ -38,6 +38,7 @@ const TABLES = [
   "interactions",
   "brokers",
   "people",
+  "listing_photos",
 ] as const;
 type Table = (typeof TABLES)[number];
 
@@ -90,6 +91,20 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
     case "votes": {
       const listingId = id(row, "listing_id");
       return listingId ? [queryKeys.votes(listingId), queryKeys.listings] : [queryKeys.listings];
+    }
+    case "listing_photos": {
+      // Photos are embedded in the listing row (`LISTING_SELECT`), so they have
+      // no key of their own: the gallery, the cards and the table all read them
+      // from `listings` / `listing(id)`. This is what makes the import path
+      // work — the dialog navigates to the detail page while `/api/photos` is
+      // still uploading, and each insert pops another thumbnail into the strip.
+      //
+      // A DELETE under the default replica identity carries only the primary
+      // key, so `listing_id` is absent and the table-wide key has to do.
+      const listingId = id(row, "listing_id");
+      return listingId
+        ? [queryKeys.listings, queryKeys.listing(listingId)]
+        : [queryKeys.listings];
     }
     case "brokers":
       // The broker list *and* the listings: `LISTING_SELECT` embeds the broker

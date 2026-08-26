@@ -38,6 +38,7 @@ Server-only vars (never `NEXT_PUBLIC_`, never read from a client component):
 |---|---|
 | `ANTHROPIC_API_KEY` | Listing import. Missing -> `/api/import` returns 503 `{disabled:true}` and the panel says import isn't configured. Nothing else breaks. |
 | `FIRECRAWL_API_KEY` | Optional. Rung two of the import ladder. Missing -> the ladder drops straight to the paste box. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Photos. Read only by `src/lib/supabase/admin.ts` (which imports `server-only`). Missing -> `/api/photos` returns 500 and photos cannot be saved; nothing else breaks. |
 
 Missing env does not break `pnpm build` — Supabase clients only throw when
 constructed at runtime, and the import route reads its key inside the request.
@@ -55,14 +56,18 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
 - `supabase/migrations/0005_pets.sql` — `listings.pets` + `listings.pet_notes`,
   `merge_listings` redefined again (the pet columns carried across, `'unknown'`
   treated as an absence rather than an answer)
+- `supabase/migrations/0007_photos.sql` — `listing_photos` + the public
+  `listing-photos` storage bucket and its three `storage.objects` policies,
+  `merge_listings` redefined once more (a duplicate's photos follow the
+  survivor), `listing_photos` added to the realtime publication
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
 MCP `apply_migration` tool. New changes go in a new numbered file; never edit an
 applied one.
 
-`merge_listings` is defined three times — 0003 and 0004 are history, 0005 is the
-live version.
+`merge_listings` is defined four times — 0003, 0004 and 0005 are history, 0007 is
+the live version.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -88,8 +93,8 @@ Run `pnpm lint && pnpm build && pnpm test` before every commit.
 
 ## Deploy
 
-Vercel, `main` branch. Set the three env vars in the Vercel project settings for
-Production and Preview.
+Vercel, `main` branch. Set the client vars *and* the server-only ones from the
+two tables above in the Vercel project settings, for Production and Preview.
 
 ## Listing import
 
@@ -147,15 +152,74 @@ case-insensitively against `brokers` and otherwise prefills the inline
 **Photos**: `photos.ts` (pure, tested) pulls candidate image URLs out of
 `og:image`, JSON-LD, `__NEXT_DATA__` and `<img srcset>`, takes the largest
 rendition, drops logos/maps/avatars/pixels, and caps at 12. The panel shows
-them as a tick-grid, all selected. Saving them is Part 3: the dialog already
-calls `savePhotos(listingId, urls)` from `src/lib/photos-client.ts` after
-`createListing`, and that function is a `TODO(part3)` no-op until
-`/api/photos` exists.
+them as a tick-grid, all selected. After `createListing` the dialog hands the
+ticked URLs to `savePhotos(listingId, urls, personId)` and navigates away
+without waiting — see **Photos** below.
 
 **Deep link**: `/listings?import=<encoded url>` opens the dialog, fetches once
 and cleans the address bar (`AddListingDialogSlot` wraps the `useSearchParams`
 read in its own Suspense boundary). Built for a future iOS share-sheet
 shortcut.
+
+## Photos
+
+Pictures of a listing come from two places — copied off the source site during
+a URL import, and uploaded from a phone after a tour — and both go through
+`POST /api/photos`.
+
+**Storage**: a **public** Supabase bucket, `listing-photos`, 8MB per object,
+webp/jpeg/png only (0007). Paths are `<listing_id>/<uuid>.webp` and
+`<listing_id>/<uuid>_thumb.webp`. Rows in `listing_photos` store the *path*,
+never the URL; `photoUrl(path)` in `src/lib/photos-client.ts` is the only place
+one becomes the other, so moving projects is an env change. Public read is a
+deliberate trade: the paths carry a random uuid, the images are of apartments
+already advertised in public, and a signed URL per thumbnail would be a round
+trip on every row of the table.
+
+**The route** (`src/app/api/photos/route.ts`, `runtime = "nodejs"`,
+`maxDuration = 60`):
+
+- `POST { listingId, personId, urls[] }` — the import path. Each URL goes
+  through `assertSafeUrl` (the import ladder's SSRF guard, re-checked on every
+  redirect hop), then a fetch with a browser UA, a `Referer` of the listing
+  page's origin (Zillow's image CDN 403s without it), a 6s timeout, an 8MB
+  streamed cap and an `image/*` content-type check.
+- `POST multipart/form-data` with `listingId`, `personId` and `files` — the
+  manual path. The browser shrinks each file first (`src/lib/images.ts`,
+  canvas → webp 1600px), so a phone is not pushing 4MB per photo.
+- `DELETE { photoId }` — removes both objects and the row. 404 if it is gone.
+
+**sharp** does the one re-encode: auto-orient from EXIF (`.rotate()` with no
+argument), metadata stripped, main image webp ≤1280px q80, thumbnail webp
+≤400px q70, four at a time. Uploads and rows are written with the **service
+role** client (`src/lib/supabase/admin.ts`) after the route has checked the
+session itself — the storage policies still allow an authenticated client to
+write directly, but that is a backstop, not a second code path.
+
+**A photo that fails is not a failed request.** Each one that does not make it
+is an entry in `failed: [{ url | name, reason }]` beside the `photos` that did,
+and the response stays 200. Only a request where *nothing* saved and every
+failure had the same cause takes a status: 401 signed out, 404 unknown listing,
+413 too big, 415 HEIC, 400 unsafe URL.
+
+**HEIC**: iPhones set to "High Efficiency" hand over HEIC, Chrome's canvas
+cannot decode it and `sharp` on Vercel has no libheif. It is rejected on the
+name and the mime type with "Export as JPEG first" rather than failing
+mysteriously. Safari usually converts to JPEG on upload, so this is rare.
+
+**Activity**: one `added_photos` row per batch ("added 8 photos to 214 Grand St
+#4B"), written by the route because it is the only thing that knows how many
+survived, and only when at least one did. Deletions are not logged — removing a
+blurry photo is not an impression.
+
+**In the UI**: `PhotoGallery` sits at the top of the detail page (snap-scroll
+strip on mobile, grid on desktop) with a lightbox on tap — arrow keys, swipe,
+and a "3 / 9" counter. The listing cards show a 64px thumb, the table a 40px
+one, and both fall back to a `bg-inset` tile with a lucide `Image` glyph so the
+rows stay aligned. `listing_photos` is in the realtime publication and maps to
+the `listings` / `listing(id)` keys, which is what makes an import feel live:
+the dialog navigates away while the route is still working and thumbnails
+appear one by one.
 
 ## Design system — "Dusk Candy"
 
@@ -210,7 +274,10 @@ important on `bg-inset`.
   *and* the matching `activity` row with a pre-rendered `summary` string. No
   component calls `supabase.from(...).insert/update/delete` directly. Reads go
   through `src/lib/queries.ts` (key factory + fetchers + `use*` hooks); later
-  phases add their verbs to `mutations.ts` and nowhere else.
+  phases add their verbs to `mutations.ts` and nowhere else. Photo writes obey
+  the rule with a different transport: `uploadPhotos` / `deletePhoto` are
+  exported from `mutations.ts` like everything else, but they `fetch` the API
+  route, because `sharp` and the storage paths are server-side.
 - **Summaries are verb phrases without the actor's name** ("added 214 Grand St
   #4B"): the feed prints the person with their colour, so the name would double up.
   `updateListing` only logs when a meaningful column changed — `updated_at`,

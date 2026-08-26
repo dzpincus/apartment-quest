@@ -14,6 +14,7 @@ import type {
   Broker,
   Interaction,
   Listing,
+  ListingPhoto,
   Message,
   Person,
   UnreadCount,
@@ -31,12 +32,24 @@ export type PersonRef = Pick<Person, "id" | "name" | "color">;
  */
 export type VoteRow = Pick<Vote, "person_id" | "vote" | "comment" | "updated_at">;
 
+/**
+ * A photo as it arrives embedded in a listing. `listing_id` is left off — it is
+ * the row you found it on — and the provenance columns (`source_url`, `bytes`,
+ * `added_by`, `created_at`) are not selected: nothing on screen shows them, and
+ * every listing read carries this array.
+ */
+export type PhotoRef = Pick<
+  ListingPhoto,
+  "id" | "storage_path" | "thumb_path" | "width" | "height" | "sort"
+>;
+
 /** Broker/person columns joined onto a listing row, plus everyone's votes. */
 export type ListingRow = Listing & {
   broker: Pick<Broker, "id" | "name" | "company" | "phone" | "email" | "notes"> | null;
   added_by_person: PersonRef | null;
   next_action_owner_person: PersonRef | null;
   votes: VoteRow[];
+  photos: PhotoRef[];
 };
 
 export type ActivityRow = Activity & { person: PersonRef | null };
@@ -68,14 +81,36 @@ export const EMPTY_UNREAD: UnreadSummary = { global: 0, byListing: {}, total: 0 
  * Votes are embedded for the same reason: the table's chips, the cards and the
  * detail widget all want them, and four rows per listing on a query that
  * already runs is cheaper than one vote query per visible listing.
+ *
+ * Photos ride along too, and the table and cards use only the first one. The
+ * embed is ordered client-side by `sortPhotos` rather than with PostgREST's
+ * `order` modifier: a merge can leave two photos sharing a `sort` (0007), and
+ * `(sort, id)` is the tie-break that keeps the strip from reshuffling itself
+ * between refetches.
  */
 const LISTING_SELECT = `
   *,
   broker:brokers(id, name, company, phone, email, notes),
   added_by_person:people!added_by(id, name, color),
   next_action_owner_person:people!next_action_owner(id, name, color),
-  votes(person_id, vote, comment, updated_at)
+  votes(person_id, vote, comment, updated_at),
+  photos:listing_photos(id, storage_path, thumb_path, width, height, sort)
 `;
+
+/**
+ * Photo order: `sort` ascending, id as the tie-break. Pure and total — a row
+ * that somehow arrives without its embed reads as "no photos" rather than
+ * throwing halfway down a listing page.
+ */
+export function sortPhotos(photos: PhotoRef[] | null | undefined): PhotoRef[] {
+  if (!photos || photos.length === 0) return [];
+  return [...photos].sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id));
+}
+
+/** Every listing that leaves this module has its photos in order. */
+function withSortedPhotos<T extends { photos?: PhotoRef[] | null }>(row: T): T {
+  return { ...row, photos: sortPhotos(row.photos) };
+}
 
 export const queryKeys = {
   people: ["people"] as const,
@@ -132,7 +167,7 @@ export async function fetchListings(): Promise<ListingRow[]> {
     .is("merged_into", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as unknown as ListingRow[];
+  return ((data ?? []) as unknown as ListingRow[]).map(withSortedPhotos);
 }
 
 /** By id, including merged rows — the detail page shows a "merged into" banner. */
@@ -143,7 +178,7 @@ export async function fetchListing(id: Uuid): Promise<ListingRow | null> {
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
-  return (data as unknown as ListingRow) ?? null;
+  return data ? withSortedPhotos(data as unknown as ListingRow) : null;
 }
 
 /** Dedupe check for the add form. Returns the live row with this key, if any. */
@@ -158,7 +193,7 @@ export async function fetchListingByDedupeKey(
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return (data as unknown as ListingRow) ?? null;
+  return data ? withSortedPhotos(data as unknown as ListingRow) : null;
 }
 
 /** Reverse-chronological feed, pre-rendered summaries (SPEC: "Activity tracking"). */

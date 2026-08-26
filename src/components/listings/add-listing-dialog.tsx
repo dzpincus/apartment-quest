@@ -286,8 +286,10 @@ function AddListingForm({
       return; // toasted by `onError`; the form keeps everything that was typed
     }
     toast.success(`Added ${listingLabel(listing.address, listing.unit)}`);
-    // TODO(part3): `savePhotos` is a no-op stub until `/api/photos` exists.
-    // Fire-and-forget by design — photos must never hold up the navigation.
+    // Fire-and-forget by design — copying photos off a listing CDN takes
+    // seconds and must never hold up the trip to the listing that was just
+    // created. `savePhotos` owns its own progress toast, and the detail page
+    // grows thumbnails as the rows land over realtime.
     if (photoUrls.length > 0) {
       void savePhotos(listing.id, photoUrls, person?.id ?? null);
     }

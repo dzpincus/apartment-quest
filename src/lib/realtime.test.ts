@@ -169,6 +169,27 @@ describe("keysForChange — people", () => {
   });
 });
 
+describe("keysForChange — listing_photos", () => {
+  it("refreshes the table and the open detail page", () => {
+    // Photos are embedded in the listing row, so they have no key of their own.
+    expect(keysForChange("listing_photos", { id: "ph1", listing_id: LISTING })).toEqual([
+      queryKeys.listings,
+      queryKeys.listing(LISTING),
+    ]);
+  });
+
+  it("falls back to the whole prefix when a DELETE carries only the id", () => {
+    expect(keysForChange("listing_photos", { id: "ph1" })).toEqual([queryKeys.listings]);
+  });
+
+  it("never invents a photos key", () => {
+    // If one is ever added to `queryKeys`, this is the test that says so.
+    for (const key of keysForChange("listing_photos", { id: "ph1", listing_id: LISTING })) {
+      expect((key as string[])[0]).toBe("listings");
+    }
+  });
+});
+
 describe("keysForChange — contract", () => {
   const TABLES = [
     "messages",
@@ -178,6 +199,7 @@ describe("keysForChange — contract", () => {
     "interactions",
     "brokers",
     "people",
+    "listing_photos",
   ] as const;
 
   it("returns at least one key for every table in the publication", () => {

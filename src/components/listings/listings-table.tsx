@@ -19,6 +19,7 @@ import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { FEE_OPTIONS } from "@/components/listings/options";
 import { PetsMark } from "@/components/listings/pets-mark";
+import { ListingThumb } from "@/components/listings/listing-thumb";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useUnread, type ListingRow } from "@/lib/queries";
 import { defaultSortDir, type Sort, type SortKey } from "@/lib/listing-filters";
@@ -127,24 +128,31 @@ function Row({
       style={{ borderLeft: `3px solid ${row.added_by_person?.color ?? "#888"}` }}
     >
       <TableCell className="max-w-56">
-        <span className="flex items-center gap-1.5">
-          <Link
-            href={`/listings/${row.id}`}
-            className="truncate font-medium underline-offset-4 hover:underline"
-          >
-            {row.address}
-          </Link>
-          <UnreadBadge count={unread} />
+        <span className="flex items-center gap-2">
+          {/* Small enough to sit inside the row's line height, so adding
+              photos never changes the table's rhythm. */}
+          <ListingThumb photo={row.photos?.[0]} alt="" className="size-10" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <Link
+                href={`/listings/${row.id}`}
+                className="truncate font-medium underline-offset-4 hover:underline"
+              >
+                {row.address}
+              </Link>
+              <UnreadBadge count={unread} />
+            </span>
+            <InlineEdit
+              label="unit"
+              value={row.unit}
+              placeholder="+ unit"
+              className="text-xs text-muted-foreground"
+              inputClassName="h-6"
+              onSave={(raw) => save({ unit: toTextOrNull(raw) })}
+              display={row.unit ? `#${row.unit}` : undefined}
+            />
+          </span>
         </span>
-        <InlineEdit
-          label="unit"
-          value={row.unit}
-          placeholder="+ unit"
-          className="text-xs text-muted-foreground"
-          inputClassName="h-6"
-          onSave={(raw) => save({ unit: toTextOrNull(raw) })}
-          display={row.unit ? `#${row.unit}` : undefined}
-        />
       </TableCell>
 
       <TableCell className="max-w-36">

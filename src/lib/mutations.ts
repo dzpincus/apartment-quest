@@ -22,6 +22,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys, type ListingRow, type VoteRow } from "@/lib/queries";
+import { resizeImage, webpName } from "@/lib/images";
+import type { SavePhotosResponse } from "@/lib/photos-client";
 import { listingLabel, STATUS_LABELS } from "@/lib/format";
 import { upsertVote, withoutVote } from "@/lib/votes";
 import { fmtDay } from "@/lib/time";
@@ -663,6 +665,58 @@ export async function updateBroker(
   return data as Broker;
 }
 
+// -- photos ------------------------------------------------------------------
+//
+// The two photo writes go over `POST`/`DELETE /api/photos` rather than through
+// supabase-js, because `sharp` and the storage paths live server-side. They are
+// still exported from here: "all writes go through mutations.ts" is about where
+// a component looks for a write, not about which transport it uses. The route
+// writes the `added_photos` activity row itself, since it is the only thing
+// that knows how many photos actually survived the trip.
+
+/**
+ * Upload files from a device. Each is shrunk in the browser first — a phone on
+ * a subway platform should not push 4MB per photo for something the server will
+ * re-encode to 1280px anyway — and `resizeImage` hands back the original file
+ * whenever it cannot decode it, so a HEIC still reaches the route and comes
+ * back with "Export as JPEG first" instead of vanishing here.
+ */
+export async function uploadPhotos(
+  personId: Uuid | null,
+  listingId: Uuid,
+  files: File[],
+): Promise<SavePhotosResponse> {
+  const form = new FormData();
+  form.set("listingId", listingId);
+  if (personId) form.set("personId", personId);
+  for (const file of files) {
+    const blob = await resizeImage(file);
+    form.append("files", blob, blob === file ? file.name : webpName(file.name));
+  }
+
+  const res = await fetch("/api/photos", { method: "POST", body: form });
+  const body = (await res.json().catch(() => null)) as SavePhotosResponse | null;
+  // A partial success is a success: some photos landed, and the caller reports
+  // the rest. Only "nothing saved" is worth throwing over.
+  if (!body || (!res.ok && (body.photos?.length ?? 0) === 0)) {
+    throw new Error(body?.error ?? "Couldn't add those photos.");
+  }
+  return { photos: body.photos ?? [], failed: body.failed ?? [], error: body.error };
+}
+
+/** Removes both objects and the row. No activity line — a deletion is not news. */
+export async function deletePhoto(photoId: Uuid): Promise<void> {
+  const res = await fetch("/api/photos", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photoId }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? "Couldn't remove that photo.");
+  }
+}
+
 // -- people ------------------------------------------------------------------
 // Renaming yourself and stating your income are settings, not impressions.
 // No activity rows for either.
@@ -938,6 +992,60 @@ export function useMutations(personId: Uuid | undefined) {
     onError: onError("Could not save the broker"),
   });
 
+  /**
+   * Photos own their toast from start to finish: uploading three pictures over
+   * a phone connection takes long enough that a button which merely goes quiet
+   * reads as broken. `onMutate` opens a loading toast with the count in it and
+   * hands the id down, so the same line turns into the result rather than
+   * stacking a second one under it.
+   */
+  const addPhotos = useMutation<
+    SavePhotosResponse,
+    unknown,
+    { listingId: Uuid; files: File[] },
+    { toastId: string | number }
+  >({
+    mutationFn: (vars) => uploadPhotos(personId ?? null, vars.listingId, vars.files),
+    onMutate: (vars) => ({
+      toastId: toast.loading(
+        `Adding ${vars.files.length} ${vars.files.length === 1 ? "photo" : "photos"}…`,
+      ),
+    }),
+    onSuccess: (result, vars, ctx) => {
+      const saved = result.photos.length;
+      const failed = result.failed.length;
+      const description =
+        failed > 0
+          ? (result.failed[0]?.reason ?? `${failed} couldn't be added.`)
+          : undefined;
+      if (saved === 0) {
+        toast.error("Couldn't add those photos.", { id: ctx?.toastId, description });
+      } else {
+        toast.success(`${saved} ${saved === 1 ? "photo" : "photos"} added`, {
+          id: ctx?.toastId,
+          description,
+        });
+      }
+      invalidateListings(vars.listingId);
+    },
+    onError: (error, _vars, ctx) => {
+      toast.error(field(error, "message") ?? "Couldn't add those photos.", {
+        id: ctx?.toastId,
+      });
+    },
+  });
+
+  const removePhoto = useMutation({
+    mutationFn: (vars: { photoId: Uuid; listingId: Uuid }) => deletePhoto(vars.photoId),
+    onSuccess: (_data, vars) => {
+      toast.success("Photo removed");
+      invalidateListings(vars.listingId);
+    },
+    onError: (error) => {
+      toast.error(field(error, "message") ?? "Couldn't remove that photo.");
+    },
+  });
+
   const renamePerson = useMutation({
     mutationFn: (name: string) => updatePersonName(requirePerson(), name),
     onSuccess: () => {
@@ -969,6 +1077,8 @@ export function useMutations(personId: Uuid | undefined) {
     markThreadRead: readThread,
     castVote: vote,
     clearVote: dropVote,
+    uploadPhotos: addPhotos,
+    deletePhoto: removePhoto,
     createBroker: addBroker,
     updateBroker: editBroker,
     updatePersonName: renamePerson,

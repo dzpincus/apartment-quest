@@ -15,6 +15,7 @@ import { BrokerCard } from "@/components/listings/broker-card";
 import { InteractionsCard } from "@/components/listings/interactions-card";
 import { NextActionCard } from "@/components/listings/next-action-card";
 import { MergeIntoDialog } from "@/components/listings/merge-into-dialog";
+import { PhotoGallery } from "@/components/listings/photo-gallery";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VotesCard } from "@/components/listings/votes-card";
@@ -151,6 +152,10 @@ function ListingDetailView({
           {!listing.merged_into && <MergeIntoDialog listing={listing} />}
         </div>
       </div>
+
+      {/* Above the fields: what the place looks like is the first question
+          anyone asks, and the answer should not be below "Broker fee %". */}
+      <PhotoGallery listing={listing} />
 
       <Card>
         <CardContent>

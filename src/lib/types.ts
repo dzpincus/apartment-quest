@@ -34,7 +34,8 @@ export type ActivityVerb =
   | "added_broker"
   | "set_next_action"
   | "updated_document"
-  | "merged_listing";
+  | "merged_listing"
+  | "added_photos";
 
 export type EntityType = "listing" | "broker" | "message" | "document";
 
@@ -99,6 +100,29 @@ export type Listing = {
   merged_into: Uuid | null;
   created_at: Timestamptz | null;
   updated_at: Timestamptz | null;
+};
+
+/**
+ * One stored image (0007_photos.sql). `storage_path` and `thumb_path` are
+ * paths *inside* the `listing-photos` bucket — `photoUrl()` in
+ * `src/lib/photos-client.ts` is the only thing that turns them into URLs.
+ *
+ * `source_url` is null for a manual upload; imported photos keep the CDN link
+ * they came from as provenance. `width`/`height` describe the main image after
+ * re-encoding, so a gallery can reserve space before it loads.
+ */
+export type ListingPhoto = {
+  id: Uuid;
+  listing_id: Uuid;
+  storage_path: string;
+  thumb_path: string;
+  source_url: string | null;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  sort: number;
+  added_by: Uuid | null;
+  created_at: Timestamptz | null;
 };
 
 export type Interaction = {
