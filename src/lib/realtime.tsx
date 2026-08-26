@@ -78,6 +78,14 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
       const listingId = id(row, "listing_id");
       return listingId ? [queryKeys.votes(listingId), queryKeys.listings] : [queryKeys.listings];
     }
+    default: {
+      // Unreachable for `Table`, and the assignment keeps it that way: adding a
+      // table to TABLES without a case above is a type error here rather than a
+      // silent `undefined` handed to the caller's `for...of`.
+      const unhandled: never = table;
+      void unhandled;
+      return [];
+    }
   }
 }
 

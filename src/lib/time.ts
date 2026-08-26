@@ -23,9 +23,23 @@ export function nowNY(now: Date = new Date()): TZDate {
  * Render a date-only column (`yyyy-MM-dd`, e.g. `next_action_due`) without
  * timezone drift — parsing it as an instant would land on the previous day in
  * New York.
+ *
+ * The components are pulled out and handed to `TZDate` as New York wall-clock
+ * numbers rather than being concatenated into a string. `new TZDate("2026-03-08T12:00:00")`
+ * has plain `Date` string semantics: the *system* zone parses it, and a device
+ * more than 12 hours ahead of New York (Tokyo, Sydney, Auckland) turns noon
+ * local into the previous evening in New York, printing "Mar 7" for a Mar 8
+ * due date. That string also ends up frozen in an `activity` summary
+ * (`setNextAction`), so the drift outlives the trip. Noon is still used as the
+ * anchor so a DST jump of an hour cannot reach either midnight.
  */
 export function fmtDay(day: string, pattern = "MMM d"): string {
-  return format(new TZDate(`${day}T12:00:00`, NY_TZ), pattern);
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(day);
+  if (!m) return day;
+  return format(
+    new TZDate(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, NY_TZ),
+    pattern,
+  );
 }
 
 /**
