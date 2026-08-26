@@ -31,8 +31,10 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files
-.env
-.env*.local
+# Everything .env, then the one exception. `.env` + `.env*.local` used to leave
+# `.env.production` and `.env.development` committable, and a secret only has
+# to be pushed once.
+.env*
 !.env.example
 
 # vercel

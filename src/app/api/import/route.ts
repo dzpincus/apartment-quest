@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { listingLabel } from "@/lib/format";
 import { assertSafeUrl, fetchPage, UnsafeUrlError } from "@/lib/import/fetch-page";
+import { normalizeListingUrl } from "@/lib/url";
 import { firecrawlEnabled, scrapeWithFirecrawl } from "@/lib/import/firecrawl";
 import { buildPrompt, PROMPT_CAP, reduceHtml } from "@/lib/import/reduce";
 import { discoverPhotos } from "@/lib/import/photos";
@@ -44,14 +45,9 @@ type Body = { url?: unknown; text?: unknown; force?: unknown };
 export async function POST(request: Request): Promise<NextResponse<ImportResponse>> {
   const started = Date.now();
 
-  let body: Body;
-  try {
-    body = (await request.json()) as Body;
-  } catch {
-    return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
-  }
-
-  // --- auth: one shared login, but the anon key alone must not spend tokens.
+  // --- auth first, before the body is read: one shared login, but the anon key
+  // alone must not spend tokens — and a signed-out caller must not be able to
+  // make us buffer 200k characters of paste before we tell them so.
   let supabase;
   try {
     supabase = await createClient();
@@ -63,6 +59,13 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  }
+
+  let body: Body;
+  try {
+    body = (await request.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
   }
 
   if (!importEnabled()) {
@@ -205,15 +208,23 @@ type ExistingRow = {
  * Re-importing a link someone already added is the single most likely way to
  * create a duplicate, and it happens before we have an address to dedupe on.
  * Cheap query, saves a whole LLM call.
+ *
+ * The match is on the *normalised* URL (`normalizeListingUrl`), because the
+ * same listing arrives with a `?utm_source=`, a `#photos` and a trailing slash
+ * depending on whether it was shared from an email, a phone or the address
+ * bar. The raw string is still in the `in` list: rows written before
+ * normalisation existed hold whatever was pasted that day.
  */
 async function findListingByUrl(
   supabase: Awaited<ReturnType<typeof createClient>>,
   url: string,
 ) {
+  const normalized = normalizeListingUrl(url);
+  const candidates = normalized && normalized !== url ? [normalized, url] : [url];
   const { data, error } = await supabase
     .from("listings")
     .select("id, address, unit, added_by_person:people!added_by(name)")
-    .eq("url", url)
+    .in("url", candidates)
     .is("merged_into", null)
     .limit(1);
   if (error || !data || data.length === 0) return null;

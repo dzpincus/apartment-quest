@@ -14,17 +14,14 @@
  */
 
 import { toast } from "sonner";
-import type { ListingPhoto } from "@/lib/types";
+import type { PhotoFailure, SavePhotosResponse } from "@/lib/photo-types";
 
 /** The public bucket from 0007_photos.sql. */
 export const PHOTO_BUCKET = "listing-photos";
 
-export type PhotoFailure = { url?: string; name?: string; reason: string };
-export type SavePhotosResponse = {
-  photos: ListingPhoto[];
-  failed: PhotoFailure[];
-  error?: string;
-};
+/** What the route answers with lives in `photo-types.ts`, which both ends import. */
+export type { PhotoFailure, SavePhotosResponse };
+
 export type SavePhotosResult = { saved: number; failed: PhotoFailure[] };
 
 /**

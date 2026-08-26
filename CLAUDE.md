@@ -68,6 +68,11 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   `listing-photos` storage bucket and its three `storage.objects` policies,
   `merge_listings` redefined once more (a duplicate's photos follow the
   survivor), `listing_photos` added to the realtime publication
+- `supabase/migrations/0008_sync_merge.sql` — `merge_listings` redefined a
+  fifth time so 0006's columns survive a merge: `listing_state` treated like
+  `pets` (`'unknown'` is an absence), `state_checked_at` as `greatest()` (the
+  last time *anybody* looked, which is what the sync queue orders by),
+  `state_note` as `coalesce()`. No schema change — one function
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
@@ -75,8 +80,8 @@ MCP `apply_migration` tool — except 0006, which is the one file whose number i
 older than its contents and goes last. New changes go in a new numbered file; never edit an
 applied one.
 
-`merge_listings` is defined four times — 0003, 0004 and 0005 are history, 0007 is
-the live version.
+`merge_listings` is defined five times — 0003, 0004, 0005 and 0007 are history,
+0008 is the live version.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -132,8 +137,10 @@ tested) shrinks the page to ~30k chars first: JSON-LD, `og:`/`twitter:` meta,
 text. `coerce.ts` (pure, tested) re-checks every value the model returns —
 rent outside $200-$50,000 is a yearly figure and gets dropped with a warning,
 enums fall back to absent rather than wrong, `"N/A"` is an absence, and a unit
-left on the end of the address is split off. **Nothing the model says is
-trusted.**
+left on the end of the address is split off. Length is checked too: address,
+neighborhood and the broker's name/company cap at 120 characters, the phone at
+40, and an email is dropped outright unless it looks like one (half an email
+address is worse than none). **Nothing the model says is trusted.**
 
 **Cost**: ~10k input tokens per import on Haiku, i.e. cents per hundred
 imports. Every call logs `input_tokens` / `output_tokens` via `console.info`.
@@ -144,8 +151,9 @@ and resolves the host — rejecting loopback, private, CGNAT, link-local
 hop. Unit-tested in `fetch-page.test.ts`; `vitest.config.mts` aliases
 `server-only` so those tests can run.
 
-**Auth**: the route calls `getUser()` and 401s without a session, so the anon
-key alone cannot spend tokens. `src/proxy.ts` also answers signed-out `/api/*`
+**Auth**: the route calls `getUser()` **before it reads the body** and 401s
+without a session, so the anon key alone cannot spend tokens — or make us
+buffer 200k characters of paste on the way to being told no. `src/proxy.ts` also answers signed-out `/api/*`
 requests with a JSON 401 instead of redirecting a `fetch` to an HTML login page.
 
 **In the UI**: `ImportPanel` sits at the top of the Add Listing dialog, above
@@ -154,7 +162,12 @@ submit the listing). Imported values **fill blanks only**; anything already
 typed wins, `notes` appends under an `— imported` line, filled inputs wear a
 yellow ring (`.import-flash` + `data-imported`) for three seconds, and
 `armDedupeCheck()` runs immediately because re-importing a link someone already
-added is the main way duplicates happen. A named broker is matched
+added is the main way duplicates happen. That pre-check matches on
+`normalizeListingUrl()` (`src/lib/url.ts`, pure and tested: lower-case host, no
+fragment, no `utm_*`/`fbclid`/`gclid`, no trailing slash) as well as the raw
+string, and `coerce.ts` stores the normalised form — so the link shared over
+WhatsApp with a campaign tag on it is the same listing as the one pasted from
+the address bar. A named broker is matched
 case-insensitively against `brokers` and otherwise prefills the inline
 "+ New broker" panel — prefilled, never auto-saved.
 
@@ -176,6 +189,11 @@ Pictures of a listing come from two places — copied off the source site during
 a URL import, and uploaded from a phone after a tour — and both go through
 `POST /api/photos`.
 
+The wire shape (`SavePhotosResponse`, `PhotoFailure`) lives in
+`src/lib/photo-types.ts` — no `server-only`, imported by the route and by both
+clients, so nothing has to `import type` out of a route module that also
+imports `sharp`. Same reasoning as `sync-types.ts`.
+
 **Storage**: a **public** Supabase bucket, `listing-photos`, 8MB per object,
 webp/jpeg/png only (0007). Paths are `<listing_id>/<uuid>.webp` and
 `<listing_id>/<uuid>_thumb.webp`. Rows in `listing_photos` store the *path*,
@@ -195,12 +213,25 @@ trip on every row of the table.
   streamed cap and an `image/*` content-type check.
 - `POST multipart/form-data` with `listingId`, `personId` and `files` — the
   manual path. The browser shrinks each file first (`src/lib/images.ts`,
-  canvas → webp 1600px), so a phone is not pushing 4MB per photo.
+  canvas → webp 1600px), so a phone is not pushing 4MB per photo. The declared
+  `content-length` is checked against 4.5MB (Vercel's own body limit) **before**
+  `formData()` buffers anything: over it is a 413 with "Batch too big — add
+  fewer photos at once", and `uploadPhotos` special-cases that status so the
+  platform's own HTML 413 — which arrives with no JSON at all — still says the
+  useful sentence.
 - `DELETE { photoId }` — removes both objects and the row. 404 if it is gone.
 
 **sharp** does the one re-encode: auto-orient from EXIF (`.rotate()` with no
 argument), metadata stripped, main image webp ≤1280px q80, thumbnail webp
-≤400px q70, four at a time. Uploads and rows are written with the **service
+≤400px q70, four at a time. The decode is **capped at 40 megapixels**
+(`limitInputPixels`) and `failOn: "truncated"`: 8MB of bytes is not 8MB of
+pixels, and a 400KB PNG declaring 12,000 x 12,000 is an OOM that takes the whole
+function with it rather than one failed photo. Dimensions are read from
+`metadata()` before anything is decoded ("Couldn't read that image." with no
+format, "That image is too large to process." over the cap — libvips usually
+throws that one out of `metadata()` itself, which is mapped to the same
+sentence). The thumbnail is derived from the **1280px main buffer**, not from a
+second pass over the original, so a 40MP JPEG is decoded once. Uploads and rows are written with the **service
 role** client (`src/lib/supabase/admin.ts`) after the route has checked the
 session itself — the storage policies still allow an authenticated client to
 write directly, but that is a backstop, not a second code path.
@@ -218,8 +249,11 @@ mysteriously. Safari usually converts to JPEG on upload, so this is rare.
 
 **Activity**: one `added_photos` row per batch ("added 8 photos to 214 Grand St
 #4B"), written by the route because it is the only thing that knows how many
-survived, and only when at least one did. Deletions are not logged — removing a
-blurry photo is not an impression.
+survived, and only when at least one did. `personId` has to name one of the
+four humans — Quest Bot (`people.key = 'bot'`) is refused, because it signs
+listing-state changes and has never been on a tour — and an id that names
+nobody costs the feed line, not the photos. Deletions are not logged — removing
+a blurry photo is not an impression.
 
 **In the UI**: `PhotoGallery` sits at the top of the detail page (snap-scroll
 strip on mobile, grid on desktop) with a lightbox on tap — arrow keys, swipe,
@@ -259,7 +293,9 @@ legitimately arrives with no cookies at all; the route itself is the gate.
 so. Rung two is skipped when the listing's own `state_note` starts with
 `blocked` and its `state_checked_at` is inside three days: a site that walled
 us off this morning will wall us off tonight, and 60 listings twice a day would
-eat Firecrawl's 500 free credits in under a week.
+eat Firecrawl's 500 free credits in under a week. A **manual** `?listing=`
+check is exempt from the cooldown — one credit, asked for on purpose, by
+somebody watching the button.
 
 **Classification is regex first, Haiku second** (`src/lib/import/classify.ts`;
 the pure half is tested). 404/410 or a redirect to `/for-rent` → `removed`; "no
@@ -269,11 +305,31 @@ says none of those costs a model call (`classify_listing`, forced tool, ≤8k
 chars of reduced text). Anything unproven is `unknown`, and `unknown` writes no
 activity row, shows no badge and moves nothing.
 
-**A block is not a state.** When every rung fails, `listing_state` is left
-exactly as it was and only `state_checked_at` and `state_note` move — a captcha
-wall can never quietly turn a live listing into a dead one. The detail page then
-says "last check blocked — site won't let us look" rather than presenting the
-stale chip as fact.
+**A block is not a state, and neither is a shrug.** `learnedNothing`
+(`src/lib/sync-types.ts`, pure and tested) is the single decision: a block, an
+error, a deadline skip, *or* a page we did fetch and could not classify
+(`unknown`) over a listing we already had an answer for. In every one of those
+`listing_state` is left exactly as it was and only `state_checked_at` and
+`state_note` move. A captcha wall can never quietly turn a live listing into a
+dead one, and a listing site rewording its "no longer available" banner can
+never walk the whole Vanished section back to `unknown` overnight. `unknown`
+over `unknown` still writes — that is a first sighting, not a forgetting. The
+detail page says "last check blocked — site won't let us look" rather than
+presenting the stale chip as fact, and a `?listing=` run reports the state it
+kept, never the `unknown` it declined to store.
+
+**An error still stamps the row.** A failed check writes `state_checked_at` and
+`state_note` (`error — <reason>`, which `isBlockedNote` deliberately does not
+match) and leaves `listing_state` alone. Without the stamp the same broken
+listing sorted to the front of every run forever and starved the other 59.
+
+**The run has a wall clock, not just a count.** `maxDuration` is 300s and Vercel
+kills the function at it, mid-write and with no response, so the pool stops
+handing out work at 240s; whatever it did not reach is counted in
+`skipped_deadline` and, with `state_checked_at` untouched, sorts first next run.
+`cron.sql.example` sets `timeout_milliseconds` to 300000 to match — that is how
+long pg_net waits for the answer and **not** a cancellation of the Vercel
+invocation.
 
 **Quest Bot** (`people.key = 'bot'`, 0006) exists because `activity.person_id`
 is NOT NULL. It signs the `listing_state_changed` rows ("noticed 214 Grand St
@@ -311,8 +367,10 @@ curl -sS -X POST "http://localhost:3000/api/sync?listing=<uuid>&force=1" \
 ```
 
 Response: `{ ran, skipped_hour_gate, checked, changed: [{id,label,from,to}],
-blocked, errors }`, plus `checkedListing` on a single-listing run. Every run
-logs one `[sync] done` line carrying the same numbers.
+blocked, errors, skipped_deadline }`, plus `checkedListing` on a single-listing
+run. The shape comes from `emptySync()` — a factory, not a shared constant, so
+no two responses hand out the same `changed` array. Every run logs one
+`[sync] done` line carrying the same numbers.
 
 ## Design system — "Dusk Candy"
 

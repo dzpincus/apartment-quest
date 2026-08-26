@@ -28,6 +28,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, MissingServiceRoleKeyError } from "@/lib/supabase/admin";
 import { listingLabel } from "@/lib/format";
 import { assertSafeUrl, BROWSER_HEADERS, UnsafeUrlError } from "@/lib/import/fetch-page";
+import {
+  BATCH_TOO_BIG_MESSAGE,
+  MULTIPART_MAX_BYTES,
+  type PhotoFailure,
+  type SavePhotosResponse,
+} from "@/lib/photo-types";
 import type { ListingPhoto, Uuid } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -51,21 +57,29 @@ const MAIN_QUALITY = 80;
 const THUMB_EDGE = 400;
 const THUMB_QUALITY = 70;
 
+/**
+ * A 40-megapixel ceiling on the *decoded* image, which is the number that
+ * decides how much memory sharp asks for — 8MB of bytes is not 8MB of pixels,
+ * and a 500KB webp declaring 60,000 x 60,000 is a decode bomb that takes the
+ * whole function down with an OOM rather than failing one photo. Real camera
+ * output tops out around 50MP on a medium-format back; a phone is 12-48MP.
+ */
+const MAX_PIXELS = 40_000_000;
+
 const HEIC_MESSAGE = "Export as JPEG first";
 const TOO_BIG_MESSAGE = "That photo is bigger than 8MB.";
+const HUGE_MESSAGE = "That image is too large to process.";
+const UNREADABLE_MESSAGE = "Couldn't read that image.";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Why one image did not make it. `kind` picks the status when *all* of them fail. */
+/**
+ * Why one image did not make it. `kind` picks the status when *all* of them
+ * fail; the `Failure` itself is the client's shape, from `photo-types.ts`.
+ */
 type FailKind = "unsafe" | "heic" | "too_big" | "other";
-type Failure = { url?: string; name?: string; reason: string };
+type Failure = PhotoFailure;
 type Attempt = { failure: Failure; kind: FailKind };
-
-export type SavePhotosResponse = {
-  photos: ListingPhoto[];
-  failed: Failure[];
-  error?: string;
-};
 
 /** One image, decoded and re-encoded, waiting for a row. */
 type Encoded = {
@@ -104,6 +118,15 @@ export async function POST(request: Request): Promise<NextResponse<SavePhotosRes
 
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("multipart/form-data")) {
+    // Before `formData()`, which buffers the whole body: twenty-four 8MB files
+    // is 192MB of request, and Vercel's own limit is 4.5MB anyway. A declared
+    // length over that is a sentence the client can act on rather than a
+    // platform 413 with an HTML body and a JSON parse error behind it.
+    const declared = Number(request.headers.get("content-length") ?? "");
+    if (Number.isFinite(declared) && declared > MULTIPART_MAX_BYTES) {
+      return json({ photos: [], failed: [], error: BATCH_TOO_BIG_MESSAGE }, 413);
+    }
+
     let form: FormData;
     try {
       form = await request.formData();
@@ -429,10 +452,19 @@ async function encodeFromUrl(
     }
 
     const body = await readCapped(res);
-    if (!body) {
+    if (body.kind === "too_big") {
       return { kind: "too_big", failure: { url: raw, reason: TOO_BIG_MESSAGE } };
     }
-    return encode(body, raw);
+    if (body.kind === "empty") {
+      // Not too big and not our fault — a 200 with no bytes. A 413 here would
+      // tell the client to send fewer photos, which would not help at all.
+      return { kind: "other", failure: { url: raw, reason: "That photo came back empty." } };
+    }
+    if (body.kind === "network") {
+      console.error("[photos] read failed", { url: raw, reason: body.reason });
+      return { kind: "other", failure: { url: raw, reason: "Couldn't fetch that photo." } };
+    }
+    return encode(body.buffer, raw);
   }
 
   return { kind: "other", failure: { url: raw, reason: "That photo redirected too many times." } };
@@ -475,17 +507,31 @@ async function encode(input: Buffer, sourceUrl: string | null): Promise<Encoded 
     failure: { url: sourceUrl ?? undefined, reason },
   });
   try {
-    const pipeline = sharp(input, { failOn: "none" }).rotate();
-    const meta = await pipeline.metadata();
-    if (!meta.format) return fail("Couldn't read that image.");
+    const pipeline = sharp(input, {
+      // `failOn: "none"` swallowed a truncated file *and* uncapped the decode:
+      // `limitInputPixels` defaults to 0x3FFF_FFFF but only when sharp's own
+      // options are left alone, and a header claiming 60,000 x 60,000 is an
+      // out-of-memory crash for the whole function, not one bad photo.
+      failOn: "truncated",
+      limitInputPixels: MAX_PIXELS,
+      sequentialRead: true,
+    }).rotate();
 
+    // Headers first: the dimensions decide whether we decode at all.
+    const meta = await pipeline.metadata();
+    if (!meta.format) return fail(UNREADABLE_MESSAGE);
+    const pixels = (meta.width ?? 0) * (meta.height ?? 0);
+    if (pixels > MAX_PIXELS) return fail(HUGE_MESSAGE);
+
+    // One decode of the original, straight to the 1280px webp; the thumbnail
+    // is then a decode of *that* (a 1280px webp, ~100KB) rather than a second
+    // pass over a 40MP JPEG. `rotate()` is already baked into `main`, so the
+    // thumbnail must not rotate again.
     const main = await pipeline
-      .clone()
       .resize({ width: MAIN_EDGE, height: MAIN_EDGE, fit: "inside", withoutEnlargement: true })
       .webp({ quality: MAIN_QUALITY })
       .toBuffer({ resolveWithObject: true });
-    const thumb = await pipeline
-      .clone()
+    const thumb = await sharp(main.data, { limitInputPixels: MAX_PIXELS })
       .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "inside", withoutEnlargement: true })
       .webp({ quality: THUMB_QUALITY })
       .toBuffer();
@@ -499,15 +545,36 @@ async function encode(input: Buffer, sourceUrl: string | null): Promise<Encoded 
       sourceUrl,
     };
   } catch (error) {
+    // libvips enforces `limitInputPixels` inside `metadata()` itself, so the
+    // bomb usually arrives here as a throw rather than as dimensions we get to
+    // measure — the explicit check above is the belt to this pair of braces.
+    // Either way the person who picked the file gets the same sentence.
+    const detail = error instanceof Error ? error.message : String(error);
     console.error("[photos] encode failed", error);
+    if (/pixel limit/i.test(detail)) return fail(HUGE_MESSAGE);
+    if (/unsupported image format/i.test(detail)) return fail(UNREADABLE_MESSAGE);
     return fail("That image wouldn't open.");
   }
 }
 
-/** Read the body, giving up at the cap instead of trusting `content-length`. */
-async function readCapped(res: Response): Promise<Buffer | null> {
+/**
+ * Read the body, giving up at the cap instead of trusting `content-length`.
+ *
+ * Three ways to come back with no buffer and they are not the same thing: a
+ * file over the cap (the client's problem, 413), an empty 200 (the host's
+ * problem) and a socket that died mid-read (nobody's problem, retryable). One
+ * `null` for all three used to report every one of them as "bigger than 8MB",
+ * which is a lie in two cases out of three and the wrong status code.
+ */
+type ReadResult =
+  | { kind: "ok"; buffer: Buffer }
+  | { kind: "too_big" }
+  | { kind: "empty" }
+  | { kind: "network"; reason: string };
+
+async function readCapped(res: Response): Promise<ReadResult> {
   const reader = res.body?.getReader();
-  if (!reader) return null;
+  if (!reader) return { kind: "empty" };
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -518,15 +585,20 @@ async function readCapped(res: Response): Promise<Buffer | null> {
       total += value.byteLength;
       if (total > MAX_BYTES) {
         await reader.cancel().catch(() => {});
-        return null;
+        return { kind: "too_big" };
       }
       chunks.push(value);
     }
-  } catch {
+  } catch (error) {
     await reader.cancel().catch(() => {});
-    return null;
+    return {
+      kind: "network",
+      reason: error instanceof Error ? error.message : String(error),
+    };
   }
-  return chunks.length > 0 ? Buffer.concat(chunks) : null;
+  return chunks.length > 0
+    ? { kind: "ok", buffer: Buffer.concat(chunks) }
+    : { kind: "empty" };
 }
 
 // -- helpers ------------------------------------------------------------------
@@ -556,14 +628,26 @@ async function requireSession(): Promise<
   return { ok: true };
 }
 
-/** `personId` if it names one of us, else null (the feed line is skipped). */
+/**
+ * `personId` if it names one of *us*, else null (the feed line is skipped).
+ *
+ * Quest Bot is a person row (0006) because `activity.person_id` is NOT NULL,
+ * not because it has a camera roll. It signs listing-state changes and nothing
+ * else, so a request naming it — a copy-pasted id, a future automation — gets
+ * an unsigned batch rather than "Quest Bot added 8 photos".
+ */
 async function resolvePerson(
   admin: ReturnType<typeof createAdminClient>,
   personId: string | null,
 ): Promise<Uuid | null> {
   if (!personId || !UUID_RE.test(personId)) return null;
-  const { data } = await admin.from("people").select("id").eq("id", personId).maybeSingle();
-  return (data?.id as Uuid | undefined) ?? null;
+  const { data } = await admin
+    .from("people")
+    .select("id, key")
+    .eq("id", personId)
+    .maybeSingle();
+  if (!data || data.key === "bot") return null;
+  return (data.id as Uuid | undefined) ?? null;
 }
 
 /** Append after whatever is already there, so an import keeps page order. */

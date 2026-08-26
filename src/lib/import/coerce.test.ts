@@ -248,3 +248,69 @@ describe("normalizeTrains", () => {
     expect(normalizeTrains("subway nearby")).toBe("");
   });
 });
+
+/**
+ * Nothing the model says is trusted, and that has to include *length*. A page
+ * built to be scraped can hand back a breadcrumb trail as an address or four
+ * kilobytes of anything as a broker name, and every one of these lands in a
+ * single-line input on the add form.
+ */
+describe("coerceExtract — length caps", () => {
+  it("caps the address at 120 characters", () => {
+    const { fields } = coerceExtract({ ...GOOD, address: "A".repeat(400), unit: "7C" });
+    expect(fields.address).toHaveLength(120);
+  });
+
+  it("caps the neighborhood at 120 characters", () => {
+    const { fields } = coerceExtract({ ...GOOD, neighborhood: "N".repeat(400) });
+    expect(fields.neighborhood).toHaveLength(120);
+  });
+
+  it("caps the broker's name, company and phone", () => {
+    const { broker } = coerceExtract({
+      ...GOOD,
+      broker: {
+        name: "N".repeat(400),
+        company: "C".repeat(400),
+        phone: "5".repeat(400),
+        email: "a@b.com",
+      },
+    });
+    expect(broker?.name).toHaveLength(120);
+    expect(broker?.company).toHaveLength(120);
+    expect(broker?.phone).toHaveLength(40);
+  });
+
+  it("leaves an ordinary value alone", () => {
+    const { fields, broker } = coerceExtract(GOOD);
+    expect(fields.address).toBe("92 Bowery");
+    expect(broker?.name).toBe("Priya Raman");
+    expect(broker?.phone).toBe("(212) 555-0188");
+  });
+
+  it("drops an email that is not one, rather than truncating it", () => {
+    for (const email of [
+      "email us at the office",
+      "priya at boweryres dot com",
+      "priya@boweryres",
+      `${"a".repeat(200)}@boweryres.com`,
+    ]) {
+      const { broker } = coerceExtract({ ...GOOD, broker: { ...GOOD.broker, email } });
+      expect(broker?.email).toBe("");
+    }
+  });
+
+  it("keeps a real one", () => {
+    const { broker } = coerceExtract(GOOD);
+    expect(broker?.email).toBe("priya@boweryres.com");
+  });
+});
+
+describe("coerceExtract — the stored URL", () => {
+  it("normalises it, so the next import's duplicate check can match", () => {
+    const { fields } = coerceExtract(GOOD, {
+      url: "https://StreetEasy.com/building/92-bowery/7c/?utm_source=share#photos",
+    });
+    expect(fields.url).toBe("https://streeteasy.com/building/92-bowery/7c");
+  });
+});

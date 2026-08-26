@@ -42,7 +42,14 @@ import {
   isBlockedNote,
   transitionSummary,
 } from "@/lib/import/classify";
-import { EMPTY_SYNC, type SyncChange, type SyncResponse } from "@/lib/sync-types";
+import {
+  emptySync,
+  errorNote,
+  learnedNothing,
+  type SyncChange,
+  type SyncOutcome,
+  type SyncResponse,
+} from "@/lib/sync-types";
 import type { ListingState, Uuid } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -60,6 +67,13 @@ const CONCURRENCY = 3;
  * it in four days; a site that blocks us today will block us tomorrow.
  */
 const BLOCK_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * The wall clock, not the listing count. `maxDuration` is 300s and Vercel kills
+ * the function at it — mid-write, with no response — so the pool stops handing
+ * out work at 240s and the leftovers are counted rather than lost. They sort
+ * first next run: `state_checked_at` never moved, so they are the oldest rows.
+ */
+const RUN_BUDGET_MS = 240_000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -74,13 +88,11 @@ type Candidate = {
   state_note: string | null;
 };
 
-type Outcome =
-  /** We saw the page and have an opinion about it. */
-  | { kind: "state"; state: ListingState; note: string }
-  /** We never saw the page. State is left alone; only the timestamp moves. */
-  | { kind: "blocked"; note: string }
-  /** Something went wrong on our side. Nothing is written, so it retries. */
-  | { kind: "error"; message: string };
+/**
+ * What one check came back with (`SyncOutcome` in `sync-types.ts`, where the
+ * pure "may this overwrite `listing_state`?" decision lives beside it).
+ */
+type Outcome = SyncOutcome;
 
 export async function POST(request: Request): Promise<NextResponse<SyncResponse>> {
   const started = Date.now();
@@ -89,11 +101,11 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
   const force = params.get("force") === "1";
 
   if (listingId && !UUID_RE.test(listingId)) {
-    return json({ ...EMPTY_SYNC, error: "Which listing?" }, 400);
+    return json({ ...emptySync(), error: "Which listing?" }, 400);
   }
 
   if (!(await authorized(request, listingId))) {
-    return json({ ...EMPTY_SYNC, error: "Not for you." }, 401);
+    return json({ ...emptySync(), error: "Not for you." }, 401);
   }
 
   // A deployment without the keys is a deployment where this feature does not
@@ -101,7 +113,7 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
   if (!adminEnabled() || !importEnabled()) {
     return json(
       {
-        ...EMPTY_SYNC,
+        ...emptySync(),
         disabled: true,
         error: "Sync isn't configured on this deployment.",
       },
@@ -113,7 +125,7 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
   const hour = nowNY().getHours();
   if (!force && !SYNC_HOURS.has(hour)) {
     console.info("[sync] skipped", { nyHour: hour });
-    return json({ ...EMPTY_SYNC, skipped_hour_gate: true });
+    return json({ ...emptySync(), skipped_hour_gate: true });
   }
 
   const admin = createAdminClient();
@@ -133,15 +145,22 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
   const { data, error } = await query;
   if (error) {
     console.error("[sync] candidate query failed", error);
-    return json({ ...EMPTY_SYNC, ran: true, error: "Couldn't read the listings." }, 500);
+    return json({ ...emptySync(), ran: true, error: "Couldn't read the listings." }, 500);
   }
 
   const candidates = (data ?? []) as Candidate[];
-  const outcomes = await pool(candidates, CONCURRENCY, inspect);
+  // The pool checks the clock before it picks anything up, so a slow site late
+  // in the run costs one check rather than the whole invocation's response.
+  const outcomes = await pool(candidates, CONCURRENCY, (row) =>
+    Date.now() - started > RUN_BUDGET_MS
+      ? Promise.resolve<Outcome>({ kind: "skipped" })
+      : inspect(row, { manual: Boolean(listingId) }),
+  );
 
   const changed: SyncChange[] = [];
   let blocked = 0;
   let errors = 0;
+  let skippedDeadline = 0;
   let botId: Uuid | null | undefined;
   let checkedListing: SyncResponse["checkedListing"];
 
@@ -149,33 +168,49 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
     const row = candidates[i] as Candidate;
     const before: ListingState = row.listing_state ?? "unknown";
 
-    if (outcome.kind === "error") {
-      errors += 1;
-      console.error("[sync] check failed", { id: row.id, reason: outcome.message });
+    // We never got to this one. Nothing is written, which is the point: an
+    // untouched `state_checked_at` puts it at the front of the next run.
+    if (outcome.kind === "skipped") {
+      skippedDeadline += 1;
       continue;
     }
 
     const checkedAt = new Date().toISOString();
-    // A blocked check knows nothing, so it may not overwrite what the last
-    // successful one found — it only records that we tried.
+    // A check that learned nothing may not overwrite what the last successful
+    // one found — it only records that we tried, and why. That covers a block,
+    // an error, *and* a page we fetched but could not classify: `unknown` over
+    // a known `off_market` is a robot forgetting, not news. See
+    // `learnedNothing` in `sync-types.ts`.
+    const nothingLearned = learnedNothing(outcome, before);
+    const note = outcome.kind === "error" ? errorNote(outcome.message) : outcome.note;
     const patch =
-      outcome.kind === "blocked"
-        ? { state_checked_at: checkedAt, state_note: outcome.note }
+      outcome.kind !== "state" || nothingLearned
+        ? { state_checked_at: checkedAt, state_note: note }
         : {
             listing_state: outcome.state,
             state_checked_at: checkedAt,
-            state_note: outcome.note,
+            state_note: note,
           };
+
+    if (outcome.kind === "error") {
+      errors += 1;
+      console.error("[sync] check failed", { id: row.id, reason: outcome.message });
+    }
 
     const { error: writeError } = await admin
       .from("listings")
       .update(patch)
       .eq("id", row.id);
     if (writeError) {
-      errors += 1;
+      // An error that also failed to write is still one failed check, not two.
+      if (outcome.kind !== "error") errors += 1;
       console.error("[sync] write failed", { id: row.id, error: writeError.message });
       continue;
     }
+
+    // A failed check has nothing to report to "Check now" beyond the failure;
+    // leaving `checkedListing` unset is what makes the toast say so.
+    if (outcome.kind === "error") continue;
 
     if (outcome.kind === "blocked") {
       blocked += 1;
@@ -185,10 +220,14 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
       continue;
     }
 
+    // `before`, not `outcome.state`: when the page told us nothing, what this
+    // listing *is* has not moved, and the detail page must not be handed an
+    // `unknown` chip we just declined to store.
     if (listingId) {
-      checkedListing = { id: row.id, state: outcome.state, note: outcome.note, blocked: false };
+      const state = nothingLearned ? before : outcome.state;
+      checkedListing = { id: row.id, state, note: outcome.note, blocked: false };
     }
-    if (outcome.state === before) continue;
+    if (nothingLearned || outcome.state === before) continue;
 
     const label = listingLabel(row.address, row.unit);
     changed.push({ id: row.id, label, from: before, to: outcome.state });
@@ -216,6 +255,7 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
     changed,
     blocked,
     errors,
+    skipped_deadline: skippedDeadline,
     ...(checkedListing ? { checkedListing } : {}),
   };
   console.info("[sync] done", {
@@ -226,6 +266,7 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
     changed: changed.length,
     blocked,
     errors,
+    skippedDeadline,
     ms: Date.now() - started,
   });
   return json(response);
@@ -238,7 +279,10 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
  * then Firecrawl but only when the site has not already proved it blocks us,
  * then regex, then — only for a page that says neither yes nor no — Haiku.
  */
-async function inspect(row: Candidate): Promise<Outcome> {
+async function inspect(
+  row: Candidate,
+  opts: { manual: boolean } = { manual: false },
+): Promise<Outcome> {
   const url = row.url;
   let direct;
   try {
@@ -262,7 +306,10 @@ async function inspect(row: Candidate): Promise<Outcome> {
     return decide({ status: direct.status, finalUrl: url, originalUrl: url });
   }
 
-  if (firecrawlEnabled() && !recentlyBlocked(row)) {
+  // The cooldown is about not burning 500 free credits on a nightly crawl. A
+  // person who pressed "Check now" is one credit and is asking on purpose, so
+  // the paid rung is always open to them.
+  if (firecrawlEnabled() && (opts.manual || !recentlyBlocked(row))) {
     let scraped;
     try {
       scraped = await scrapeWithFirecrawl(url);

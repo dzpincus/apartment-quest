@@ -14,6 +14,7 @@ import {
   LISTING_FORM_DEFAULTS,
   type ListingFormValues,
 } from "@/components/listings/listing-form";
+import { normalizeListingUrl } from "@/lib/url";
 
 /** The `record_listing` tool's output, before anyone has checked it. */
 export type RawExtract = {
@@ -75,6 +76,34 @@ const TRAILING_UNIT_RE =
   /[,\s]+(?:#\s*([A-Za-z0-9-]+)|(?:Apt|Apartment|Unit|Ste|Suite)\.?\s*([A-Za-z0-9-]+))\s*$/i;
 
 const NOTES_MAX = 300;
+
+/**
+ * Length caps on the free-text fields.
+ *
+ * `notes` was already capped; the rest were not, and a model that decides the
+ * "address" is the page's whole breadcrumb trail — or a prompt-injected page
+ * that hands back four kilobytes of instructions as a broker name — would put
+ * all of it into an input the form renders on one line. A real NYC address is
+ * under 60 characters; 120 is generous and still bounded.
+ */
+const ADDRESS_MAX = 120;
+const NEIGHBORHOOD_MAX = 120;
+const BROKER_TEXT_MAX = 120;
+const PHONE_MAX = 40;
+const EMAIL_MAX = 120;
+
+/**
+ * Loose on purpose: this is the difference between an email address and a
+ * sentence, not RFC 5322. Anything that fails it is dropped rather than
+ * truncated — half an email address is worse than none, because it looks
+ * usable right up until someone tries it.
+ */
+const EMAIL_RE = /^[^\s@,;<>()]+@[^\s@,;<>()]+\.[A-Za-z]{2,}$/;
+
+/** Trim, then cap. A cap on an untrimmed string can leave trailing whitespace. */
+function capped(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max).trim() : value;
+}
 
 function str(v: unknown): string {
   if (v == null) return "";
@@ -196,11 +225,11 @@ export function coerceExtract(
   const warnings: string[] = [];
 
   const split = splitUnit(str(raw.address), str(raw.unit));
-  if (split.address) fields.address = split.address;
+  if (split.address) fields.address = capped(split.address, ADDRESS_MAX);
   if (split.unit) fields.unit = split.unit;
 
   const hood = str(raw.neighborhood);
-  if (hood) fields.neighborhood = hood;
+  if (hood) fields.neighborhood = capped(hood, NEIGHBORHOOD_MAX);
 
   const rent = boundedNumber(raw.rent, { min: RENT_MIN, max: RENT_MAX });
   if (rent.value) fields.rent = rent.value;
@@ -240,16 +269,20 @@ export function coerceExtract(
   const notes = str(raw.notes);
   if (notes) fields.notes = notes.slice(0, NOTES_MAX);
 
+  // Normalised on the way in, so the URL a listing is *stored* with is the same
+  // string the next import's duplicate check compares against (`url.ts`).
   const url = str(opts.url);
-  if (url) fields.url = url;
+  if (url) fields.url = normalizeListingUrl(url) || url;
 
-  const brokerName = str(raw.broker?.name);
+  const brokerName = capped(str(raw.broker?.name), BROKER_TEXT_MAX);
+  const brokerEmail = str(raw.broker?.email);
   const broker: ImportedBroker | null = brokerName
     ? {
         name: brokerName,
-        company: str(raw.broker?.company),
-        phone: str(raw.broker?.phone),
-        email: str(raw.broker?.email),
+        company: capped(str(raw.broker?.company), BROKER_TEXT_MAX),
+        phone: capped(str(raw.broker?.phone), PHONE_MAX),
+        email:
+          brokerEmail.length <= EMAIL_MAX && EMAIL_RE.test(brokerEmail) ? brokerEmail : "",
       }
     : null;
 

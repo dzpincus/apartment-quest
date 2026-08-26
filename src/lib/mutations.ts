@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys, type ListingRow, type VoteRow } from "@/lib/queries";
 import { resizeImage, webpName } from "@/lib/images";
-import type { SavePhotosResponse } from "@/lib/photos-client";
+import { BATCH_TOO_BIG_MESSAGE, type SavePhotosResponse } from "@/lib/photo-types";
 import { LINK_STATE_LABELS, listingLabel, STATUS_LABELS } from "@/lib/format";
 import type { SyncResponse } from "@/lib/sync-types";
 import { upsertVote, withoutVote } from "@/lib/votes";
@@ -756,6 +756,13 @@ export async function uploadPhotos(
 
   const res = await fetch("/api/photos", { method: "POST", body: form });
   const body = (await res.json().catch(() => null)) as SavePhotosResponse | null;
+  // 413 is the one failure with an action attached, and it is also the one
+  // most likely to arrive with no JSON at all — the platform can refuse an
+  // over-sized body before our route ever runs, and its answer is HTML. Say
+  // the useful sentence in both cases rather than "Couldn't add those photos".
+  if (res.status === 413) {
+    throw new Error(body?.error || BATCH_TOO_BIG_MESSAGE);
+  }
   // A partial success is a success: some photos landed, and the caller reports
   // the rest. Only "nothing saved" is worth throwing over.
   if (!body || (!res.ok && (body.photos?.length ?? 0) === 0)) {

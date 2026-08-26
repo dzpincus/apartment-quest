@@ -28,6 +28,8 @@ export type SyncResponse = {
   /** Checks where the site never let us see the page. State left alone. */
   blocked: number;
   errors: number;
+  /** Listings the run ran out of wall clock for. Next run picks them up first. */
+  skipped_deadline: number;
   /** Set for a `?listing=` run: what that one listing looks like now. */
   checkedListing?: { id: Uuid; state: ListingState; note: string | null; blocked: boolean };
   /** No `SUPABASE_SERVICE_ROLE_KEY` / `ANTHROPIC_API_KEY` on this deployment. */
@@ -35,15 +37,63 @@ export type SyncResponse = {
   error?: string;
 };
 
-/** The empty run, so every early return has the same shape. */
-export const EMPTY_SYNC: SyncResponse = {
-  ran: false,
-  skipped_hour_gate: false,
-  checked: 0,
-  changed: [],
-  blocked: 0,
-  errors: 0,
-};
+/**
+ * The empty run, so every early return has the same shape.
+ *
+ * A factory rather than a shared constant: the old `EMPTY_SYNC` was spread
+ * into six responses, and every one of them handed the *same* `changed` array
+ * to the caller. Nothing mutates it today, which is exactly the kind of thing
+ * that stays true until it does not.
+ */
+export function emptySync(): SyncResponse {
+  return {
+    ran: false,
+    skipped_hour_gate: false,
+    checked: 0,
+    changed: [],
+    blocked: 0,
+    errors: 0,
+    skipped_deadline: 0,
+  };
+}
+
+/** What one check came back with. `/api/sync` builds these; `decide` below reads them. */
+export type SyncOutcome =
+  /** We saw the page and have an opinion about it. */
+  | { kind: "state"; state: ListingState; note: string }
+  /** We never saw the page. State is left alone; only the timestamp moves. */
+  | { kind: "blocked"; note: string }
+  /** Something went wrong on our side. */
+  | { kind: "error"; message: string }
+  /** The run hit its wall-clock budget before reaching this one. */
+  | { kind: "skipped" };
+
+/**
+ * Did this check learn anything that may overwrite `listing_state`?
+ *
+ * Three ways to learn nothing, and only one of them used to be handled. A
+ * block never saw the page. An error never got that far. And — the subtle one
+ * — a page we *did* fetch and could not classify comes back `unknown`, which
+ * is an absence of evidence and must not be written over a hard-won
+ * `off_market`: a listing site that quietly changes its "no longer available"
+ * wording would otherwise walk every vanished listing back to `unknown`
+ * overnight and empty the Vanished section.
+ *
+ * `unknown` over `unknown` is not a loss of information, so a first sighting
+ * still writes and still stamps the state.
+ */
+export function learnedNothing(outcome: SyncOutcome, before: ListingState): boolean {
+  if (outcome.kind === "error" || outcome.kind === "skipped") return true;
+  return (
+    outcome.kind === "blocked" ||
+    (outcome.state === "unknown" && before !== "unknown")
+  );
+}
+
+/** A failed check's note. Same 140-char cap as a blocked one, different word. */
+export function errorNote(reason: string): string {
+  return `error — ${reason}`.slice(0, NOTE_CAP);
+}
 
 /**
  * A check that never saw the page writes its note with this prefix. Two things
