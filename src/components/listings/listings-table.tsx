@@ -63,7 +63,17 @@ export function ListingsTable({
       <TableHeader>
         <TableRow>
           {COLUMNS.map((col) => (
-            <TableHead key={col.key} className={col.className}>
+            <TableHead
+              key={col.key}
+              className={col.className}
+              aria-sort={
+                sort.key === col.key
+                  ? sort.dir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
+            >
               <button
                 type="button"
                 onClick={() => toggle(col.key)}

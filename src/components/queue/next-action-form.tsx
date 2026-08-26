@@ -59,13 +59,19 @@ export function NextActionForm({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSave) return;
-    await setNextAction.mutateAsync({
-      listing,
-      nextAction: text,
-      dueDate: due,
-      ownerId,
-      ownerName: people.find((p) => p.id === ownerId)?.name ?? null,
-    });
+    try {
+      await setNextAction.mutateAsync({
+        listing,
+        nextAction: text,
+        dueDate: due,
+        ownerId,
+        ownerName: people.find((p) => p.id === ownerId)?.name ?? null,
+      });
+    } catch {
+      // Toasted by `onError`. `onSaved` closes the un-skippable prompt, so it
+      // must not fire for a plan that was never written.
+      return;
+    }
     onSaved?.();
   }
 

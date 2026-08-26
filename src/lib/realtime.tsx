@@ -24,8 +24,21 @@ import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/queries";
 
-/** Every table in the `supabase_realtime` publication (0003_rpc_triggers.sql). */
-const TABLES = ["messages", "listings", "votes", "activity", "interactions"] as const;
+/**
+ * Every table in the `supabase_realtime` publication (0003_rpc_triggers.sql,
+ * extended by 0004_review_fixes.sql). Adding one here without adding it to the
+ * publication is a channel that never fires; adding it to the publication
+ * without adding it here is a change nobody hears.
+ */
+const TABLES = [
+  "messages",
+  "listings",
+  "votes",
+  "activity",
+  "interactions",
+  "brokers",
+  "people",
+] as const;
 type Table = (typeof TABLES)[number];
 
 /**
@@ -78,6 +91,14 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
       const listingId = id(row, "listing_id");
       return listingId ? [queryKeys.votes(listingId), queryKeys.listings] : [queryKeys.listings];
     }
+    case "brokers":
+      // The broker list *and* the listings: `LISTING_SELECT` embeds the broker
+      // columns, so a renamed brokerage is stale on every row it is attached to.
+      return [queryKeys.brokers, queryKeys.listings];
+    case "people":
+      // Names and colours are read from `usePerson().people`, and incomes feed
+      // the qualification badge — all of it hangs off this one key.
+      return [queryKeys.people];
     default: {
       // Unreachable for `Table`, and the assignment keeps it that way: adding a
       // table to TABLES without a case above is a type error here rather than a

@@ -41,15 +41,27 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
 - `supabase/migrations/0001_schema.sql` — tables + indexes
 - `supabase/migrations/0002_rls.sql` — RLS on every table, one `authenticated` policy each
 - `supabase/migrations/0003_rpc_triggers.sql` — `set_updated_at`, `merge_listings`, `unread_counts`, realtime publication
+- `supabase/migrations/0004_review_fixes.sql` — `log_interaction`, `mark_thread_read`,
+  `merge_listings` redefined (follow-up columns carried across, merged targets
+  refused), `brokers` + `people` added to the realtime publication
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
 MCP `apply_migration` tool. New changes go in a new numbered file; never edit an
 applied one.
 
+`merge_listings` is defined twice — 0003 is history, 0004 is the live version.
+`CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
+must restate `set search_path = public`.
+
 Deviations from `SPEC.md` are commented in the SQL: `people.key` + `people.annual_income`,
 `thread_reads.listing_id` NOT NULL with a separate `global_reads` table, and CHECK
-constraints on the enum-ish text columns.
+constraints on the enum-ish text columns. One more lives in the UI rather than the
+schema: **the person gate is a picker over the seeded rows, not a free-text sign-up.**
+`people` is a fixed roster of four written by `seed.sql`, so `PersonProvider` offers
+buttons and nothing else — there is no "add me" path, and an empty list is a seeding
+problem, which is what the gate says. A failed *fetch* is a different thing and now
+says so, with a Retry, rather than pointing at `seed.sql`.
 
 ## Commands
 
@@ -110,7 +122,21 @@ Production and Preview.
   a next action or marking the listing Passed / Lost. SPEC: "If it is skippable,
   everything rots." `logInteraction` also bumps `last_contacted_at` and moves a
   still-`saved` listing to `contacted` without writing a second
-  `changed_status` row — one contact is one impression.
+  `changed_status` row — one contact is one impression. All three writes are one
+  `log_interaction` RPC (0004), so a dropped connection cannot leave a listing
+  `contacted` with no history; the failure path stays on step 1 rather than
+  advancing into the prompt it cannot dismiss.
+- **`mutateAsync` is always wrapped.** `onError` fires the toast, so the `catch`
+  is empty and only guards what comes *after* the await — the success toast, the
+  `onDone()`, the `router.push`. An unwrapped `mutateAsync` is both an unhandled
+  rejection and a UI that pretends the write worked. Fire-and-forget writes use
+  `.mutate` instead.
+- **Server clock for anything the buckets or badges compare.** `log_interaction`
+  and `mark_thread_read` stamp `now()` in Postgres, the same clock
+  `messages.created_at` comes from. A device running fast used to mark messages
+  read before they were written. `useQueue` is the mirror image: it holds `now`
+  in state and ticks it every 60s, because the buckets are boundaries in time
+  and a tab left open froze on the day it was mounted.
 - **Realtime is invalidation only.** `RealtimeProvider` (`src/lib/realtime.tsx`) is
   mounted once in `(app)/layout.tsx` inside the QueryClientProvider and opens a
   single channel (`app`) listening to `postgres_changes` on messages, listings,

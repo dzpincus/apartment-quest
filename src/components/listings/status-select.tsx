@@ -24,6 +24,11 @@ export function StatusSelect({
       aria-label="Status"
       size={size}
       className={className}
+      // No optimistic patch here: the write also nulls the follow-up triple for
+      // passed/lost, so a local guess would have to reimplement that. Locking
+      // the control instead keeps the displayed value honest for the one round
+      // trip, and stops a double-pick racing itself.
+      disabled={setListingStatus.isPending}
       value={listing.status ?? "saved"}
       options={STATUS_OPTIONS}
       onValueChange={(status) => setListingStatus.mutate({ listing, status })}

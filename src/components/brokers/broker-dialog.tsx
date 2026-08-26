@@ -70,12 +70,19 @@ function BrokerDialogBody({
         onCancel={onDone}
         onSubmit={async (values) => {
           const payload = brokerPayload(values);
-          if (broker) {
-            await updateBroker.mutateAsync({ id: broker.id, patch: payload });
-            toast.success(`Saved ${payload.name}`);
-          } else {
-            await createBroker.mutateAsync(payload);
-            toast.success(`Added ${payload.name}`);
+          try {
+            if (broker) {
+              await updateBroker.mutateAsync({ id: broker.id, patch: payload });
+              toast.success(`Saved ${payload.name}`);
+            } else {
+              await createBroker.mutateAsync(payload);
+              toast.success(`Added ${payload.name}`);
+            }
+          } catch {
+            // Toasted by `onError`. The dialog stays open with the typed values,
+            // which is the whole point of catching: a duplicate name is worth
+            // fixing in place, not retyping.
+            return;
           }
           onDone();
         }}

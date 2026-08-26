@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
@@ -71,6 +71,9 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
   const [armedKey, setArmedKey] = useState<string | null>(null);
   const [ignoreDupe, setIgnoreDupe] = useState(false);
   const [showBrokerForm, setShowBrokerForm] = useState(false);
+  const dupeRef = useRef<HTMLDivElement>(null);
+  /** Bumped by a blocked submit; the effect below is what actually scrolls. */
+  const [scrollNonce, setScrollNonce] = useState(0);
 
   const form = useForm<ListingFormValues>({
     resolver: zodResolver(listingSchema),
@@ -83,11 +86,33 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
   });
   const duplicate = ignoreDupe ? null : (dupeQuery.data ?? null);
 
-  /** Arm the dedupe lookup on blur so it is not one request per keystroke. */
+  // The warning renders below the address row and the dialog scrolls, so on a
+  // long form a blocked submit could otherwise look like a dead button.
+  //
+  // Keyed on both the nonce and the row: the warning may already be mounted
+  // (the blur check found it first) or may only mount once the submit-time
+  // lookup resolves, and this fires in either order. Nothing is set here —
+  // a `setState` in an effect body is a cascading render.
+  useEffect(() => {
+    if (scrollNonce === 0 || !duplicate) return;
+    dupeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [scrollNonce, duplicate]);
+
+  /**
+   * Arm the dedupe lookup on blur so it is not one request per keystroke.
+   *
+   * Also un-latches "Add anyway": that was a decision about the address it was
+   * clicked for, and leaving it set meant the *next* address typed into the
+   * same open dialog was inserted with no dupe check at all. Compared by key
+   * rather than by keystroke — `form.watch()` would make the React Compiler
+   * skip memoizing this whole component.
+   */
   function armDedupeCheck() {
     const { address, unit } = form.getValues();
     if (!address.trim()) return;
-    setArmedKey(dedupeKey(address, unit));
+    const key = dedupeKey(address, unit);
+    if (key !== armedKey) setIgnoreDupe(false);
+    setArmedKey(key);
   }
 
   const brokerOptions: SelectOption[] = [
@@ -101,18 +126,36 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
 
   async function onSubmit(values: ListingFormValues) {
     const patch = toListingPatch(values);
+    const key = dedupeKey(values.address, values.unit);
 
-    if (!ignoreDupe) {
-      const key = dedupeKey(values.address, values.unit);
+    // The blur handler already re-arms on a changed address, but clicking
+    // submit blurs and submits in the same batch, so `ignoreDupe` here can
+    // still be the previous render's answer. Scope the override to the exact
+    // key it was granted for and the race stops mattering.
+    const override = ignoreDupe && key === armedKey;
+
+    if (!override) {
+      if (ignoreDupe) setIgnoreDupe(false);
       const existing = await qc.fetchQuery({
         queryKey: queryKeys.listingByDedupeKey(key),
         queryFn: () => fetchListingByDedupeKey(key),
       });
       setArmedKey(key);
-      if (existing) return; // the warning below now renders; user picks a path
+      if (existing) {
+        // The warning below now renders and the user picks a path. Say so:
+        // silently swallowing the submit reads as a broken button.
+        toast.info(`${listingLabel(existing.address, existing.unit)} is already on the board.`);
+        setScrollNonce((n) => n + 1);
+        return;
+      }
     }
 
-    const listing = await createListing.mutateAsync(patch);
+    let listing;
+    try {
+      listing = await createListing.mutateAsync(patch);
+    } catch {
+      return; // toasted by `onError`; the form keeps everything that was typed
+    }
     toast.success(`Added ${listingLabel(listing.address, listing.unit)}`);
     onDone();
     router.push(`/listings/${listing.id}`);
@@ -121,7 +164,12 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
   async function onMerge() {
     if (!duplicate) return;
     const patch = toListingPatch(form.getValues());
-    const merged = await mergeIntoExisting.mutateAsync({ existing: duplicate, patch });
+    let merged;
+    try {
+      merged = await mergeIntoExisting.mutateAsync({ existing: duplicate, patch });
+    } catch {
+      return; // toasted by `onError`
+    }
     toast.success(`Merged into ${listingLabel(merged.address, merged.unit)}`);
     onDone();
     router.push(`/listings/${merged.id}`);
@@ -162,7 +210,10 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
         </div>
 
         {duplicate && (
-          <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+          <div
+            ref={dupeRef}
+            className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+          >
             <p className="flex items-start gap-2 text-sm">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
               <span>
@@ -322,7 +373,12 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
               pending={createBroker.isPending}
               onCancel={() => setShowBrokerForm(false)}
               onSubmit={async (values) => {
-                const broker = await createBroker.mutateAsync(brokerPayload(values));
+                let broker;
+                try {
+                  broker = await createBroker.mutateAsync(brokerPayload(values));
+                } catch {
+                  return; // toasted by `onError`; the sub-form stays open
+                }
                 form.setValue("broker_id", broker.id);
                 setShowBrokerForm(false);
                 toast.success(`Added broker ${broker.name}`);

@@ -66,7 +66,13 @@ function MergePicker({
 
   async function confirm() {
     if (!target) return;
-    await mergeListings.mutateAsync({ src: listing, dstId: target.id });
+    try {
+      await mergeListings.mutateAsync({ src: listing, dstId: target.id });
+    } catch {
+      // Toasted by `onError`; without this the failure was silent and the
+      // "Merged into …" success toast fired on top of it.
+      return;
+    }
     toast.success(`Merged into ${listingLabel(target.address, target.unit)}`);
     onDone();
     router.push(`/listings/${target.id}`);

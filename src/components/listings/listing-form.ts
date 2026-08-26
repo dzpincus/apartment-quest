@@ -14,6 +14,13 @@ const numeric = (label: string) =>
       `${label} must be a number`,
     );
 
+/**
+ * Shared with the detail page's inline "Link" edit, which bypasses this schema
+ * entirely and would otherwise happily store `javascript:alert(1)` — the
+ * anchor next to it renders whatever is in the column.
+ */
+export const URL_RE = /^https?:\/\/\S+$/;
+
 export const listingSchema = z.object({
   address: z.string().trim().min(1, "Address is required"),
   unit: z.string().trim(),
@@ -25,7 +32,7 @@ export const listingSchema = z.object({
   url: z
     .string()
     .trim()
-    .refine((v) => v === "" || /^https?:\/\/\S+$/.test(v), "Must start with http"),
+    .refine((v) => v === "" || URL_RE.test(v), "Must start with http"),
   available_date: z.string().trim(),
   fee_type: z.enum(["no_fee", "fee", "op", "unknown"]),
   broker_fee_pct: numeric("Broker fee"),

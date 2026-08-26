@@ -308,27 +308,21 @@ export async function logInteraction(
   input: { kind: InteractionKind; notes?: string | null },
 ): Promise<Interaction> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("interactions")
-    .insert({
-      listing_id: listing.id,
-      person_id: personId,
-      kind: input.kind,
-      notes: input.notes?.trim() || null,
-    })
-    .select("*")
-    .single();
+  // One statement, one transaction: the interaction row, the `last_contacted_at`
+  // bump and the status move either all land or none do. As three client round
+  // trips a dropped connection could leave a listing `contacted` with no history
+  // behind it (`log_interaction`, 0004_review_fixes.sql). The RPC also decides
+  // the status move from the stored row rather than from this cached copy.
+  const { data, error } = await supabase.rpc("log_interaction", {
+    p_person: personId,
+    p_listing: listing.id,
+    p_kind: input.kind,
+    p_notes: input.notes ?? null,
+  });
   if (error) throw error;
-
-  const patch: { last_contacted_at: string; status?: ListingStatus } = {
-    last_contacted_at: new Date().toISOString(),
-  };
-  if ((listing.status ?? "saved") === "saved") patch.status = "contacted";
-  const { error: bumpError } = await supabase
-    .from("listings")
-    .update(patch)
-    .eq("id", listing.id);
-  if (bumpError) throw bumpError;
+  // A single-composite return arrives as an object; tolerate the array shape
+  // too, since that is a PostgREST version detail and not a contract.
+  const interaction = (Array.isArray(data) ? data[0] : data) as Interaction;
 
   await logActivity({
     personId,
@@ -337,7 +331,7 @@ export async function logInteraction(
     entityId: listing.id,
     summary: INTERACTION_SUMMARY[input.kind](listingLabel(listing.address, listing.unit)),
   });
-  return data as Interaction;
+  return interaction;
 }
 
 /**
@@ -418,19 +412,16 @@ export async function markThreadRead(
   personId: Uuid,
   listingId: Uuid | null,
 ): Promise<void> {
-  const supabase = createClient();
-  const last_read_at = new Date().toISOString();
-  // The global thread lives in its own table: `thread_reads.listing_id` is part
-  // of the primary key and Postgres will not enforce uniqueness over a null.
-  const { error } =
-    listingId === null
-      ? await supabase
-          .from("global_reads")
-          .upsert({ person_id: personId, last_read_at }, { onConflict: "person_id" })
-      : await supabase.from("thread_reads").upsert(
-          { person_id: personId, listing_id: listingId, last_read_at },
-          { onConflict: "person_id,listing_id" },
-        );
+  // `last_read_at` is stamped server-side (`mark_thread_read`,
+  // 0004_review_fixes.sql). A browser clock running fast used to mark messages
+  // read *before* they were written, so the badge cleared and the message never
+  // came back. The RPC also picks the table: the global thread lives in
+  // `global_reads` because `thread_reads.listing_id` is part of the primary key
+  // and Postgres will not enforce uniqueness over a null.
+  const { error } = await createClient().rpc("mark_thread_read", {
+    p_person: personId,
+    p_listing: listingId,
+  });
   if (error) throw error;
 }
 
@@ -575,23 +566,48 @@ export async function castVote(personId: Uuid, input: CastVoteInput): Promise<Vo
   return data as Vote;
 }
 
+/**
+ * The feed line for a withdrawal, worded from what was actually deleted.
+ * "Clear" also removes a comment-only row (one that was kept for its text
+ * without taking a side), and calling that "withdrew vote" was a lie; deleting
+ * a row that was not there at all is worth nothing.
+ */
+export function clearVoteSummary(
+  label: string,
+  removed: Pick<Vote, "vote" | "comment"> | null | undefined,
+): string | null {
+  if (!removed) return null;
+  if (removed.vote) return `withdrew vote on ${label}`;
+  if (removed.comment?.trim()) return `removed their comment on ${label}`;
+  return null;
+}
+
 /** Withdraw: the row goes, so the widget shows "—" rather than a null vote. */
 export async function clearVote(
   personId: Uuid,
   listing: Pick<Listing, "id" | "address" | "unit">,
 ): Promise<void> {
-  const { error } = await createClient()
+  // `select()` on the delete hands back what was removed, so the summary is
+  // decided by the row that existed rather than by an assumption about it.
+  const { data, error } = await createClient()
     .from("votes")
     .delete()
     .eq("listing_id", listing.id)
-    .eq("person_id", personId);
+    .eq("person_id", personId)
+    .select("vote, comment");
   if (error) throw error;
+
+  const summary = clearVoteSummary(
+    listingLabel(listing.address, listing.unit),
+    (data ?? [])[0] as Pick<Vote, "vote" | "comment"> | undefined,
+  );
+  if (!summary) return;
   await logActivity({
     personId,
     verb: "voted",
     entityType: "listing",
     entityId: listing.id,
-    summary: `withdrew vote on ${listingLabel(listing.address, listing.unit)}`,
+    summary,
   });
 }
 
@@ -656,11 +672,21 @@ export async function updatePersonIncome(personId: Uuid, income: number) {
 
 // -- hook --------------------------------------------------------------------
 
-function errorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message) || fallback;
+/**
+ * Postgres codes worth a sentence a person can act on. `23505` is a unique
+ * violation, and the only unique constraints a person can hit by typing are
+ * `people_name_lower` and the broker/listing names beside it.
+ */
+const PG_MESSAGES: Record<string, string> = {
+  "23505": "That name is already taken.",
+};
+
+function field(error: unknown, key: string): string | null {
+  if (error && typeof error === "object" && key in error) {
+    const value = (error as Record<string, unknown>)[key];
+    if (typeof value === "string" && value !== "") return value;
   }
-  return fallback;
+  return null;
 }
 
 /**
@@ -681,8 +707,23 @@ export function useMutations(personId: Uuid | undefined) {
     void qc.invalidateQueries({ queryKey: queryKeys.activity });
   };
 
+  /**
+   * `label` is the context ("Could not add the listing"), not the headline:
+   * a raw `duplicate key value violates unique constraint "people_name_lower"`
+   * as a toast title is a stack trace shown to a person. Known codes get a
+   * sentence, everything else gets the generic with the driver's own message
+   * underneath it, which is where it is useful rather than alarming.
+   */
   const onError = (label: string) => (error: unknown) => {
-    toast.error(errorMessage(error, label));
+    const code = field(error, "code");
+    const known = code ? PG_MESSAGES[code] : undefined;
+    if (known) {
+      toast.error(known, { description: label });
+      return;
+    }
+    toast.error("Something went wrong — try again.", {
+      description: field(error, "message") ?? label,
+    });
   };
 
   const create = useMutation({

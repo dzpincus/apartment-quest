@@ -105,7 +105,14 @@ function LogStep({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    await logInteraction.mutateAsync({ listing, kind, notes });
+    try {
+      await logInteraction.mutateAsync({ listing, kind, notes });
+    } catch {
+      // `onError` already toasted. Staying on step 1 with the note intact is
+      // the recovery: advancing to the un-skippable step 2 after a failed write
+      // would trap the user behind a prompt about a contact that never happened.
+      return;
+    }
     onLogged();
   }
 
@@ -120,9 +127,9 @@ function LogStep({
 
       <form id="log-contact" onSubmit={submit} className="grid gap-3">
         <Field>
-          <FieldLabel>What happened?</FieldLabel>
+          <FieldLabel htmlFor="contact-kind">What happened?</FieldLabel>
           <SimpleSelect<InteractionKind>
-            aria-label="Kind"
+            id="contact-kind"
             value={kind}
             options={KIND_OPTIONS}
             onValueChange={setKind}
@@ -157,7 +164,12 @@ function NextStep({ listing, onDone }: { listing: ContactTarget; onDone: () => v
   const [marking, setMarking] = useState(false);
 
   async function mark(status: ListingStatus) {
-    await setListingStatus.mutateAsync({ listing, status });
+    try {
+      await setListingStatus.mutateAsync({ listing, status });
+    } catch {
+      // Toasted by `onError`; the dialog stays open so the exit is still owed.
+      return;
+    }
     onDone();
   }
 

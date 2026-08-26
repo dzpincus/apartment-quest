@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { meaningfulChanges, voteSummary, type ListingPatch } from "./mutations";
+import {
+  clearVoteSummary,
+  meaningfulChanges,
+  voteSummary,
+  type ListingPatch,
+} from "./mutations";
 import type { Listing } from "./types";
 
 /**
@@ -244,5 +249,51 @@ describe("voteSummary", () => {
 
   it("carries the label through verbatim, however odd it is", () => {
     expect(voteSummary("(no address)", "yes", null, null)).toBe("voted yes on (no address)");
+  });
+});
+
+describe("clearVoteSummary", () => {
+  const L = "214 Grand St #4B";
+
+  it("says 'withdrew vote' when a side was actually taken", () => {
+    expect(clearVoteSummary(L, { vote: "yes", comment: null })).toBe(`withdrew vote on ${L}`);
+    expect(clearVoteSummary(L, { vote: "no", comment: "too far" })).toBe(
+      `withdrew vote on ${L}`,
+    );
+  });
+
+  it("says 'removed their comment' for a row that only ever held text", () => {
+    // `castVote` keeps a row with `vote: null` so a comment survives without
+    // taking a side. Calling that deletion a withdrawn vote was a lie in the
+    // feed — there was never a vote to withdraw.
+    expect(clearVoteSummary(L, { vote: null, comment: "asked about the fee" })).toBe(
+      `removed their comment on ${L}`,
+    );
+  });
+
+  it("logs nothing when the delete removed nothing", () => {
+    // Clear on a listing this person never voted on: no row came back, so no
+    // impression happened and the feed stays quiet.
+    expect(clearVoteSummary(L, undefined)).toBeNull();
+    expect(clearVoteSummary(L, null)).toBeNull();
+  });
+
+  it("logs nothing for a row that was empty on both counts", () => {
+    expect(clearVoteSummary(L, { vote: null, comment: null })).toBeNull();
+    expect(clearVoteSummary(L, { vote: null, comment: "" })).toBeNull();
+    // Whitespace is not a comment.
+    expect(clearVoteSummary(L, { vote: null, comment: "   " })).toBeNull();
+  });
+
+  it("prefers the vote wording when the row had both", () => {
+    expect(clearVoteSummary(L, { vote: "maybe", comment: "on the fence" })).toBe(
+      `withdrew vote on ${L}`,
+    );
+  });
+
+  it("carries the label through verbatim", () => {
+    expect(clearVoteSummary("(no address)", { vote: "yes", comment: null })).toBe(
+      "withdrew vote on (no address)",
+    );
   });
 });

@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { fetchPeople, queryKeys } from "@/lib/queries";
 import type { Person } from "@/lib/types";
 import {
   Dialog,
@@ -63,18 +63,18 @@ export function useRequirePerson(): Person {
   return person;
 }
 
+/**
+ * The people list, defined once. The key and the fetcher come from
+ * `queries.ts` — this module used to carry a second copy of both, which is one
+ * schema change away from two queries that disagree. The import cycle with
+ * `queries.ts` (which needs `usePerson` for the unread badges) is safe: every
+ * reference on both sides is inside a function body, so neither module touches
+ * the other while it is still evaluating.
+ */
 export function peopleQueryOptions() {
   return {
-    queryKey: ["people"] as const,
-    queryFn: async (): Promise<Person[]> => {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("people")
-        .select("*")
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as Person[];
-    },
+    queryKey: queryKeys.people,
+    queryFn: fetchPeople,
     staleTime: 5 * 60_000,
   };
 }
@@ -82,7 +82,7 @@ export function peopleQueryOptions() {
 export function PersonProvider({ children }: { children: React.ReactNode }) {
   const personId = useSyncExternalStore(subscribe, readPersonId, () => null);
 
-  const { data: people = [], isPending } = useQuery(peopleQueryOptions());
+  const { data: people = [], isPending, error, refetch } = useQuery(peopleQueryOptions());
 
   const setPersonId = useCallback((id: string) => writePersonId(id), []);
 
@@ -111,6 +111,19 @@ export function PersonProvider({ children }: { children: React.ReactNode }) {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
+            {/* A failed fetch and an unseeded database both left an empty list,
+                so a dropped connection told you to go run seed.sql. */}
+            {error && (
+              <div className="grid gap-2">
+                <p className="text-sm text-destructive">
+                  Could not load the list of people:{" "}
+                  {String((error as Error).message)}
+                </p>
+                <Button variant="outline" onClick={() => void refetch()}>
+                  Retry
+                </Button>
+              </div>
+            )}
             {people.map((p) => (
               <Button
                 key={p.id}
@@ -129,7 +142,7 @@ export function PersonProvider({ children }: { children: React.ReactNode }) {
                 {p.name}
               </Button>
             ))}
-            {people.length === 0 && (
+            {!error && people.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 No people found. Run supabase/seed.sql.
               </p>

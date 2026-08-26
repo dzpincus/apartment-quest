@@ -126,8 +126,59 @@ describe("keysForChange — votes", () => {
   });
 });
 
+describe("keysForChange — brokers", () => {
+  it("refreshes the broker list and every listing that embeds one", () => {
+    // `LISTING_SELECT` embeds the broker columns, so a rename that only
+    // invalidated `["brokers"]` would leave the old company on the table.
+    expect(keysForChange("brokers", { id: "b1", name: "Ada" })).toEqual([
+      queryKeys.brokers,
+      queryKeys.listings,
+    ]);
+  });
+
+  it("does not care what the row contains", () => {
+    // Brokers are not keyed per-listing, so there is nothing to read off the
+    // payload — a DELETE carrying only the primary key routes identically.
+    expect(keysForChange("brokers", {})).toEqual([queryKeys.brokers, queryKeys.listings]);
+    expect(keysForChange("brokers", { id: "b1" })).toEqual([
+      queryKeys.brokers,
+      queryKeys.listings,
+    ]);
+  });
+});
+
+describe("keysForChange — people", () => {
+  it("refreshes the people key, which is the whole roster", () => {
+    // Names, colours and incomes all hang off `["people"]`; `usePerson()` and
+    // the qualification badge read from that one cache entry.
+    expect(keysForChange("people", { id: "p1", name: "Ada" })).toEqual([queryKeys.people]);
+    expect(keysForChange("people", {})).toEqual([queryKeys.people]);
+  });
+
+  it("uses the literal key the person provider queries", () => {
+    // `peopleQueryOptions()` in person.tsx takes its key from the factory now,
+    // so this is that one key spelled out. person.tsx is not imported here: it
+    // pulls in the whole dialog tree, and these are pure-logic tests.
+    expect(keysForChange("people", { id: "p1" })[0]).toEqual(["people"]);
+  });
+
+  it("does not drag the listings prefix along", () => {
+    // Deliberate: a rename is rare and cheap to miss for a moment, and pulling
+    // `["listings"]` in would refetch every listing on every income edit.
+    expect(keysForChange("people", { id: "p1" })).not.toContainEqual(queryKeys.listings);
+  });
+});
+
 describe("keysForChange — contract", () => {
-  const TABLES = ["messages", "listings", "votes", "activity", "interactions"] as const;
+  const TABLES = [
+    "messages",
+    "listings",
+    "votes",
+    "activity",
+    "interactions",
+    "brokers",
+    "people",
+  ] as const;
 
   it("returns at least one key for every table in the publication", () => {
     for (const table of TABLES) {
@@ -151,7 +202,16 @@ describe("keysForChange — contract", () => {
   });
 
   it("only ever emits keys the query-key factory could have produced", () => {
-    const roots = new Set(["messages", "listings", "unread", "activity", "interactions", "votes"]);
+    const roots = new Set([
+      "messages",
+      "listings",
+      "unread",
+      "activity",
+      "interactions",
+      "votes",
+      "brokers",
+      "people",
+    ]);
     for (const table of TABLES) {
       for (const row of [{}, { id: LISTING, listing_id: LISTING }, { listing_id: null }]) {
         for (const key of keysForChange(table, row)) {

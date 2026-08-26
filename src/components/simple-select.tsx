@@ -20,6 +20,7 @@ export type SelectOption<T extends string = string> = {
 };
 
 export function SimpleSelect<T extends string>({
+  id,
   value,
   onValueChange,
   options,
@@ -30,6 +31,8 @@ export function SimpleSelect<T extends string>({
   disabled,
   "aria-label": ariaLabel,
 }: {
+  /** Lands on the trigger, so a `<FieldLabel htmlFor>` can point at it. */
+  id?: string;
   value: T | null;
   onValueChange: (value: T) => void;
   options: ReadonlyArray<SelectOption<T>>;
@@ -49,7 +52,12 @@ export function SimpleSelect<T extends string>({
         if (next != null) onValueChange(next as T);
       }}
     >
-      <SelectTrigger size={size} className={cn("w-full", className)} aria-label={ariaLabel}>
+      <SelectTrigger
+        id={id}
+        size={size}
+        className={cn("w-full", className)}
+        aria-label={ariaLabel}
+      >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={contentClassName}>

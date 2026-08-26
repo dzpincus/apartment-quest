@@ -43,15 +43,21 @@ export function InlineEdit({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initial);
   const cancelled = useRef(false);
+  const committed = useRef(false);
 
   function start() {
     if (disabled) return;
     cancelled.current = false;
+    committed.current = false;
     setDraft(initial);
     setEditing(true);
   }
 
   function commit() {
+    // Enter commits and then the input unmounts, which fires `onBlur` and
+    // commits again — two identical writes and two activity rows for one edit.
+    if (committed.current) return;
+    committed.current = true;
     setEditing(false);
     if (cancelled.current) return;
     if (draft.trim() === initial.trim()) return;
@@ -70,6 +76,7 @@ export function InlineEdit({
         if (e.key === "Escape") {
           e.preventDefault();
           cancelled.current = true;
+          committed.current = true;
           setEditing(false);
         }
         if (e.key === "Enter" && (!multiline || e.metaKey)) {

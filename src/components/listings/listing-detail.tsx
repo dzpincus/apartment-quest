@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "sonner";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import {
   guarantorToChoice,
   type GuarantorChoice,
 } from "@/components/listings/options";
+import { URL_RE } from "@/components/listings/listing-form";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useListing, useUnread } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
@@ -120,13 +122,18 @@ function ListingDetailView({
             incomes={incomes}
           />
           <StatusSelect listing={listing} size="default" className="w-40" />
-          {listing.url && (
+          {/* Only http(s) becomes a link. Rows predating the inline-edit
+              validation below can still hold anything, and `href` is the one
+              place a stored string turns into executable intent. */}
+          {listing.url && /^https?:\/\//i.test(listing.url) && (
             <Button variant="outline" size="sm" render={<a href={listing.url} target="_blank" rel="noreferrer" />}>
               <ExternalLink />
               Open
             </Button>
           )}
-          <MergeIntoDialog listing={listing} />
+          {/* Merging a row that is already merged builds a chain the banner
+              above only follows one hop of; the RPC now refuses it too. */}
+          {!listing.merged_into && <MergeIntoDialog listing={listing} />}
         </div>
       </div>
 
@@ -248,7 +255,16 @@ function ListingDetailView({
                 label="link"
                 value={listing.url}
                 className="truncate"
-                onSave={(raw) => save({ url: toTextOrNull(raw) })}
+                // Same rule as the add form (`URL_RE`): the inline edit is a
+                // second door into the same column and had no lock on it.
+                onSave={(raw) => {
+                  const url = toTextOrNull(raw);
+                  if (url !== null && !URL_RE.test(url)) {
+                    toast.error("Links must start with http:// or https://");
+                    return;
+                  }
+                  save({ url });
+                }}
               />
             </DetailField>
             <DetailField label="Added by">
