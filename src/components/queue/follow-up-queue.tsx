@@ -22,32 +22,27 @@ import type { ListingRow } from "@/lib/queries";
 const SECTIONS: ReadonlyArray<{
   bucket: QueueBucket;
   title: string;
-  empty: string;
   /** CSS colour token; also the border of the cards in this bucket. */
   tone: string;
 }> = [
   {
     bucket: "overdue",
     title: "Overdue",
-    empty: "Nothing overdue. Heroes.",
     tone: "var(--urgent)",
   },
   {
     bucket: "today",
     title: "Today",
-    empty: "Nothing due today.",
     tone: "var(--due)",
   },
   {
     bucket: "cold",
     title: "Gone quiet",
-    empty: "nobody's ghosting you",
     tone: "var(--quiet)",
   },
   {
     bucket: "vanished",
     title: "Vanished?",
-    empty: "Everything's still standing.",
     tone: "var(--quiet)",
   },
 ];
@@ -69,16 +64,13 @@ export function FollowUpQueue() {
         const rows: ListingRow[] = buckets[section.bucket];
         return (
           <section key={section.bucket} className="grid gap-2.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <div className="flex items-center">
               <h2
                 className="rounded-full px-2.5 py-1 text-xs font-black tracking-wide text-ink uppercase"
                 style={{ backgroundColor: section.tone }}
               >
                 {section.title} · {isPending ? "—" : rows.length}
               </h2>
-              {!isPending && rows.length === 0 && (
-                <span className="ml-auto text-[13px] text-faint">{section.empty}</span>
-              )}
             </div>
 
             {isPending ? (
