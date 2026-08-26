@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,7 +22,12 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { SimpleSelect, type SelectOption } from "@/components/simple-select";
-import { BrokerForm, brokerPayload } from "@/components/brokers/broker-form";
+import {
+  BrokerForm,
+  brokerPayload,
+  type BrokerValues,
+} from "@/components/brokers/broker-form";
+import { ImportPanel } from "@/components/listings/import-panel";
 import {
   FEE_OPTIONS,
   GUARANTOR_OPTIONS,
@@ -35,6 +40,9 @@ import {
   toListingPatch,
   type ListingFormValues,
 } from "@/components/listings/listing-form";
+import type { FormKey } from "@/lib/import/coerce";
+import type { ImportSuccess } from "@/lib/import/types";
+import { savePhotos } from "@/lib/photos-client";
 import { usePerson } from "@/lib/person";
 import { useMutations } from "@/lib/mutations";
 import { dedupeKey } from "@/lib/dedupe";
@@ -49,20 +57,59 @@ import type { FeeType, PetsPolicy } from "@/lib/types";
 
 const NEW_BROKER = "__new__";
 
-export function AddListingDialog() {
-  const [open, setOpen] = useState(false);
+/** How long an imported field wears its yellow ring. */
+const HIGHLIGHT_MS = 3_000;
+
+export function AddListingDialog({ importUrl = null }: { importUrl?: string | null }) {
+  // A deep link opens the dialog on arrival; a click opens it on click.
+  const [open, setOpen] = useState(Boolean(importUrl));
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button size="sm" />}>
         <Plus />
         Add listing
       </DialogTrigger>
-      {open && <AddListingForm onDone={() => setOpen(false)} />}
+      {open && <AddListingForm onDone={() => setOpen(false)} importUrl={importUrl} />}
     </Dialog>
   );
 }
 
-function AddListingForm({ onDone }: { onDone: () => void }) {
+/**
+ * `/listings?import=<url>` — the entry point an iOS share-sheet shortcut will
+ * eventually hit. The param is read once, then wiped from the address bar so a
+ * reload (or a back/forward) does not re-open the dialog and re-import.
+ *
+ * `useSearchParams` opts its subtree out of prerendering, which is why the
+ * caller wraps this in `<Suspense>` and not the other way round.
+ */
+export function AddListingDialogWithImport() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const [importUrl] = useState(() => params.get("import"));
+
+  useEffect(() => {
+    if (params.get("import")) router.replace("/listings", { scroll: false });
+  }, [params, router]);
+
+  return <AddListingDialog importUrl={importUrl} />;
+}
+
+/** The trigger button with the deep-link plumbing behind a Suspense boundary. */
+export function AddListingDialogSlot() {
+  return (
+    <Suspense fallback={<AddListingDialog />}>
+      <AddListingDialogWithImport />
+    </Suspense>
+  );
+}
+
+function AddListingForm({
+  onDone,
+  importUrl = null,
+}: {
+  onDone: () => void;
+  importUrl?: string | null;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const { person } = usePerson();
@@ -72,6 +119,14 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
   const [armedKey, setArmedKey] = useState<string | null>(null);
   const [ignoreDupe, setIgnoreDupe] = useState(false);
   const [showBrokerForm, setShowBrokerForm] = useState(false);
+  /** Prefill for the inline "+ New broker" panel when an import named an agent
+   *  we have never seen. Doubles as the remount key, since `BrokerForm` reads
+   *  its defaults once. */
+  const [brokerPrefill, setBrokerPrefill] = useState<Partial<BrokerValues> | null>(null);
+  /** Keys the import just filled — they wear a yellow ring for a few seconds. */
+  const [highlight, setHighlight] = useState<ReadonlySet<FormKey>>(new Set());
+  /** Photos ticked in the panel. Saved once the listing exists and has an id. */
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const dupeRef = useRef<HTMLDivElement>(null);
   /** Bumped by a blocked submit; the effect below is what actually scrolls. */
   const [scrollNonce, setScrollNonce] = useState(0);
@@ -98,6 +153,79 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
     if (scrollNonce === 0 || !duplicate) return;
     dupeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [scrollNonce, duplicate]);
+
+  // The ring is a "look here" nudge, not a state anyone should have to clear.
+  useEffect(() => {
+    if (highlight.size === 0) return;
+    const timer = setTimeout(() => setHighlight(new Set()), HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlight]);
+
+  /**
+   * Fold an import into the form.
+   *
+   * The rule is: **imported values fill blanks, they never overwrite you.** A
+   * field counts as blank when it is empty or still sitting on its default
+   * (`fee_type: "unknown"`, `broker_id: "none"`), which is the same definition
+   * the rest of the app uses for "nobody has answered this yet". Anything the
+   * user typed before hitting Fetch survives.
+   *
+   * `notes` is the exception and appends instead — the extracted amenities are
+   * additional information, not a replacement for whatever was typed.
+   */
+  function onImportFill(result: ImportSuccess) {
+    const current = form.getValues();
+    const filled: FormKey[] = [];
+
+    for (const key of Object.keys(result.fields) as FormKey[]) {
+      if (key === "notes") continue;
+      const value = result.fields[key];
+      if (typeof value !== "string" || value.trim() === "") continue;
+      const existing = current[key] ?? "";
+      const blank = existing.trim() === "" || existing === LISTING_FORM_DEFAULTS[key];
+      if (!blank) continue;
+      form.setValue(key, value, { shouldDirty: true });
+      filled.push(key);
+    }
+
+    const importedNotes = result.fields.notes?.trim();
+    if (importedNotes) {
+      const existing = current.notes.trim();
+      const block = `— imported\n${importedNotes}`;
+      form.setValue("notes", existing ? `${existing}\n\n${block}` : block, {
+        shouldDirty: true,
+      });
+      filled.push("notes");
+    }
+
+    if (result.broker) {
+      const wanted = result.broker.name.trim().toLowerCase();
+      const match = brokers.find((b) => b.name.trim().toLowerCase() === wanted);
+      if (match) {
+        form.setValue("broker_id", match.id, { shouldDirty: true });
+        filled.push("broker_id");
+        setShowBrokerForm(false);
+        setBrokerPrefill(null);
+      } else {
+        // Prefilled, not saved: a broker row is a real record and someone
+        // should look at it before it exists.
+        setBrokerPrefill(result.broker);
+        setShowBrokerForm(true);
+      }
+    }
+
+    setHighlight(new Set(filled));
+    // Re-importing a link somebody already added is the main source of
+    // duplicates, and the address only just arrived — check it now.
+    armDedupeCheck();
+  }
+
+  /** Yellow ring + a hook for anyone reading the DOM. */
+  function imported(key: FormKey) {
+    return highlight.has(key)
+      ? { className: "import-flash", "data-imported": "true" }
+      : {};
+  }
 
   /**
    * Arm the dedupe lookup on blur so it is not one request per keystroke.
@@ -158,6 +286,11 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
       return; // toasted by `onError`; the form keeps everything that was typed
     }
     toast.success(`Added ${listingLabel(listing.address, listing.unit)}`);
+    // TODO(part3): `savePhotos` is a no-op stub until `/api/photos` exists.
+    // Fire-and-forget by design — photos must never hold up the navigation.
+    if (photoUrls.length > 0) {
+      void savePhotos(listing.id, photoUrls, person?.id ?? null);
+    }
     onDone();
     router.push(`/listings/${listing.id}`);
   }
@@ -188,6 +321,13 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
         </DialogDescription>
       </DialogHeader>
 
+      <ImportPanel
+        initialUrl={importUrl}
+        autoFetch={Boolean(importUrl)}
+        onFill={onImportFill}
+        onPhotosChange={setPhotoUrls}
+      />
+
       <form id="add-listing" onSubmit={form.handleSubmit(onSubmit)} className="grid gap-3">
         <div className="grid gap-3 sm:grid-cols-[2fr_1fr]">
           <Field>
@@ -196,6 +336,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
               id="address"
               autoFocus
               placeholder="214 Grand St"
+              {...imported("address")}
               {...form.register("address", { onBlur: armDedupeCheck })}
             />
             <FieldError errors={[errors.address]} />
@@ -205,6 +346,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
             <Input
               id="unit"
               placeholder="4B"
+              {...imported("unit")}
               {...form.register("unit", { onBlur: armDedupeCheck })}
             />
           </Field>
@@ -249,16 +391,30 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
         <div className="grid gap-3 sm:grid-cols-3">
           <Field>
             <FieldLabel htmlFor="neighborhood">Neighborhood</FieldLabel>
-            <Input id="neighborhood" {...form.register("neighborhood")} />
+            <Input
+              id="neighborhood"
+              {...imported("neighborhood")}
+              {...form.register("neighborhood")}
+            />
           </Field>
           <Field>
             <FieldLabel htmlFor="rent">Rent / month</FieldLabel>
-            <Input id="rent" inputMode="numeric" {...form.register("rent")} />
+            <Input
+              id="rent"
+              inputMode="numeric"
+              {...imported("rent")}
+              {...form.register("rent")}
+            />
             <FieldError errors={[errors.rent]} />
           </Field>
           <Field>
             <FieldLabel htmlFor="sqft">Sqft</FieldLabel>
-            <Input id="sqft" inputMode="numeric" {...form.register("sqft")} />
+            <Input
+              id="sqft"
+              inputMode="numeric"
+              {...imported("sqft")}
+              {...form.register("sqft")}
+            />
             <FieldError errors={[errors.sqft]} />
           </Field>
         </div>
@@ -266,17 +422,32 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
         <div className="grid gap-3 sm:grid-cols-4">
           <Field>
             <FieldLabel htmlFor="beds">Beds</FieldLabel>
-            <Input id="beds" inputMode="decimal" {...form.register("beds")} />
+            <Input
+              id="beds"
+              inputMode="decimal"
+              {...imported("beds")}
+              {...form.register("beds")}
+            />
             <FieldError errors={[errors.beds]} />
           </Field>
           <Field>
             <FieldLabel htmlFor="baths">Baths</FieldLabel>
-            <Input id="baths" inputMode="decimal" {...form.register("baths")} />
+            <Input
+              id="baths"
+              inputMode="decimal"
+              {...imported("baths")}
+              {...form.register("baths")}
+            />
             <FieldError errors={[errors.baths]} />
           </Field>
           <Field>
             <FieldLabel htmlFor="available_date">Available</FieldLabel>
-            <Input id="available_date" type="date" {...form.register("available_date")} />
+            <Input
+              id="available_date"
+              type="date"
+              {...imported("available_date")}
+              {...form.register("available_date")}
+            />
           </Field>
           <Field>
             <FieldLabel htmlFor="income_multiplier">Income x</FieldLabel>
@@ -300,6 +471,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
                   value={field.value}
                   options={FEE_OPTIONS}
                   onValueChange={field.onChange}
+                  className={highlight.has("fee_type") ? "import-flash" : undefined}
                   aria-label="Fee type"
                 />
               )}
@@ -310,6 +482,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
             <Input
               id="broker_fee_pct"
               inputMode="decimal"
+              {...imported("broker_fee_pct")}
               {...form.register("broker_fee_pct")}
             />
             <FieldError errors={[errors.broker_fee_pct]} />
@@ -324,6 +497,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
                   value={field.value}
                   options={GUARANTOR_OPTIONS}
                   onValueChange={field.onChange}
+                  className={highlight.has("guarantor_ok") ? "import-flash" : undefined}
                   aria-label="Guarantor"
                 />
               )}
@@ -343,6 +517,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
                   value={field.value}
                   options={PETS_OPTIONS}
                   onValueChange={field.onChange}
+                  className={highlight.has("pets") ? "import-flash" : undefined}
                   aria-label="Pets"
                 />
               )}
@@ -353,6 +528,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
             <Input
               id="pet_notes"
               placeholder="e.g. under 25 lb, $500 deposit"
+              {...imported("pet_notes")}
               {...form.register("pet_notes")}
             />
           </Field>
@@ -361,12 +537,22 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="url">Link</FieldLabel>
-            <Input id="url" placeholder="https://…" {...form.register("url")} />
+            <Input
+              id="url"
+              placeholder="https://…"
+              {...imported("url")}
+              {...form.register("url")}
+            />
             <FieldError errors={[errors.url]} />
           </Field>
           <Field>
             <FieldLabel htmlFor="trains">Trains</FieldLabel>
-            <Input id="trains" placeholder="J M Z" {...form.register("trains")} />
+            <Input
+              id="trains"
+              placeholder="J M Z"
+              {...imported("trains")}
+              {...form.register("trains")}
+            />
           </Field>
         </div>
 
@@ -379,6 +565,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
               <SimpleSelect
                 value={field.value}
                 options={brokerOptions}
+                className={highlight.has("broker_id") ? "import-flash" : undefined}
                 aria-label="Broker"
                 onValueChange={(value) => {
                   if (value === NEW_BROKER) {
@@ -395,11 +582,18 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
 
         {showBrokerForm && (
           <div className="rounded-lg border p-3">
-            <p className="mb-2 text-sm font-medium">New broker</p>
+            <p className="mb-2 text-sm font-medium">
+              {brokerPrefill ? "New broker (from the listing)" : "New broker"}
+            </p>
             <BrokerForm
+              key={brokerPrefill?.name ?? "blank"}
+              initialValues={brokerPrefill ?? undefined}
               submitLabel="Add broker"
               pending={createBroker.isPending}
-              onCancel={() => setShowBrokerForm(false)}
+              onCancel={() => {
+                setShowBrokerForm(false);
+                setBrokerPrefill(null);
+              }}
               onSubmit={async (values) => {
                 let broker;
                 try {
@@ -409,6 +603,7 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
                 }
                 form.setValue("broker_id", broker.id);
                 setShowBrokerForm(false);
+                setBrokerPrefill(null);
                 toast.success(`Added broker ${broker.name}`);
               }}
             />
@@ -417,7 +612,12 @@ function AddListingForm({ onDone }: { onDone: () => void }) {
 
         <Field>
           <FieldLabel htmlFor="notes">Notes</FieldLabel>
-          <Textarea id="notes" rows={3} {...form.register("notes")} />
+          <Textarea
+            id="notes"
+            rows={3}
+            {...imported("notes")}
+            {...form.register("notes")}
+          />
         </Field>
       </form>
 

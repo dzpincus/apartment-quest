@@ -3,7 +3,8 @@
 # Apartment Quest
 
 Private NYC apartment-hunt tracker for four people. Product spec: `SPEC.md`.
-Manual listing entry only — no scraping, no listing-site APIs, no file uploads.
+Listings are typed in by hand or **imported from a listing URL** (see "Listing
+import" below). No listing-site APIs, no headless browser, no file uploads.
 
 ## Stack
 
@@ -31,8 +32,15 @@ Env vars (all client-visible, all `NEXT_PUBLIC_`):
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon/public key (new-style `sb_publishable_...` also works) |
 | `NEXT_PUBLIC_APP_LOGIN_EMAIL` | Identifier for the one shared auth user. Never rendered. |
 
+Server-only vars (never `NEXT_PUBLIC_`, never read from a client component):
+
+| Var | Notes |
+|---|---|
+| `ANTHROPIC_API_KEY` | Listing import. Missing -> `/api/import` returns 503 `{disabled:true}` and the panel says import isn't configured. Nothing else breaks. |
+| `FIRECRAWL_API_KEY` | Optional. Rung two of the import ladder. Missing -> the ladder drops straight to the paste box. |
+
 Missing env does not break `pnpm build` — Supabase clients only throw when
-constructed at runtime.
+constructed at runtime, and the import route reads its key inside the request.
 
 ## Database
 
@@ -82,6 +90,72 @@ Run `pnpm lint && pnpm build && pnpm test` before every commit.
 
 Vercel, `main` branch. Set the three env vars in the Vercel project settings for
 Production and Preview.
+
+## Listing import
+
+`POST /api/import` takes `{ url }` or `{ text }` and hands back a filled-in
+add-listing form. Everything server-side lives in `src/lib/import/`.
+
+**The ladder.** Zillow and StreetEasy run PerimeterX-style bot walls and a
+bare fetch from a datacentre IP is often a captcha, so there are three rungs
+and the last one always works:
+
+1. `fetch-page.ts` — direct fetch, Chrome UA, 8s, 2MB cap, ≤3 redirects.
+2. `firecrawl.ts` — only if `FIRECRAWL_API_KEY` is set *and* rung 1 came back
+   blocked. Free tier is 500 credits, so it is never the first attempt.
+3. Paste. The response is `{ blocked: true, reason }` — a **200**, not a 500 —
+   and the panel swaps in a textarea. `{ text }` skips straight to extraction.
+
+**A site refusing us is not an error.** The route never 500s on a block, a
+captcha, a timeout or a JavaScript-only shell; each of those is a `blocked`
+result with a sentence a human can act on.
+
+**Extraction is one forced tool call.** `extract.ts` sends the reduced page to
+`claude-haiku-4-5-20251001` with `tool_choice: { type: "tool", name:
+"record_listing" }`, so the model cannot reply with prose. `reduce.ts` (pure,
+tested) shrinks the page to ~30k chars first: JSON-LD, `og:`/`twitter:` meta,
+`__NEXT_DATA__` leaves whose keys look like rent/beds/address, then visible
+text. `coerce.ts` (pure, tested) re-checks every value the model returns —
+rent outside $200-$50,000 is a yearly figure and gets dropped with a warning,
+enums fall back to absent rather than wrong, `"N/A"` is an absence, and a unit
+left on the end of the address is split off. **Nothing the model says is
+trusted.**
+
+**Cost**: ~10k input tokens per import on Haiku, i.e. cents per hundred
+imports. Every call logs `input_tokens` / `output_tokens` via `console.info`.
+
+**SSRF**: `assertSafeUrl` allows http(s) only, no credentials, ports 80/443,
+and resolves the host — rejecting loopback, private, CGNAT, link-local
+(`169.254.169.254`), ULA and multicast. `redirect: "manual"`, re-checked every
+hop. Unit-tested in `fetch-page.test.ts`; `vitest.config.mts` aliases
+`server-only` so those tests can run.
+
+**Auth**: the route calls `getUser()` and 401s without a session, so the anon
+key alone cannot spend tokens. `src/proxy.ts` also answers signed-out `/api/*`
+requests with a JSON 401 instead of redirecting a `fetch` to an HTML login page.
+
+**In the UI**: `ImportPanel` sits at the top of the Add Listing dialog, above
+the `<form>` element (not inside it — a stray Enter or a nested button would
+submit the listing). Imported values **fill blanks only**; anything already
+typed wins, `notes` appends under an `— imported` line, filled inputs wear a
+yellow ring (`.import-flash` + `data-imported`) for three seconds, and
+`armDedupeCheck()` runs immediately because re-importing a link someone already
+added is the main way duplicates happen. A named broker is matched
+case-insensitively against `brokers` and otherwise prefills the inline
+"+ New broker" panel — prefilled, never auto-saved.
+
+**Photos**: `photos.ts` (pure, tested) pulls candidate image URLs out of
+`og:image`, JSON-LD, `__NEXT_DATA__` and `<img srcset>`, takes the largest
+rendition, drops logos/maps/avatars/pixels, and caps at 12. The panel shows
+them as a tick-grid, all selected. Saving them is Part 3: the dialog already
+calls `savePhotos(listingId, urls)` from `src/lib/photos-client.ts` after
+`createListing`, and that function is a `TODO(part3)` no-op until
+`/api/photos` exists.
+
+**Deep link**: `/listings?import=<encoded url>` opens the dialog, fetches once
+and cleans the address bar (`AddListingDialogSlot` wraps the `useSearchParams`
+read in its own Suspense boundary). Built for a future iOS share-sheet
+shortcut.
 
 ## Design system — "Dusk Candy"
 

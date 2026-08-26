@@ -52,14 +52,38 @@ export function brokerPayload(values: BrokerValues) {
   };
 }
 
+/**
+ * Overlay whatever we were handed on top of the defaults, ignoring keys that
+ * are absent. Used by the listing import, which knows the agent's name and
+ * maybe a phone number and nothing else.
+ */
+function withInitial(
+  base: BrokerValues,
+  initial: Partial<BrokerValues> | undefined,
+): BrokerValues {
+  if (!initial) return base;
+  const out = { ...base };
+  for (const key of Object.keys(base) as (keyof BrokerValues)[]) {
+    const value = initial[key];
+    if (typeof value === "string" && value.trim() !== "") out[key] = value;
+  }
+  return out;
+}
+
 export function BrokerForm({
   broker,
+  initialValues,
   submitLabel = "Save broker",
   pending = false,
   onSubmit,
   onCancel,
 }: {
   broker?: Broker | null;
+  /**
+   * Prefill for a broker that does not exist yet. Read once, at mount, like
+   * every other `defaultValues` — remount with a `key` to change it.
+   */
+  initialValues?: Partial<BrokerValues>;
   submitLabel?: string;
   pending?: boolean;
   onSubmit: (values: BrokerValues) => void;
@@ -67,7 +91,7 @@ export function BrokerForm({
 }) {
   const form = useForm<BrokerValues>({
     resolver: zodResolver(brokerSchema),
-    defaultValues: brokerDefaults(broker),
+    defaultValues: withInitial(brokerDefaults(broker), initialValues),
   });
   const { errors } = form.formState;
 

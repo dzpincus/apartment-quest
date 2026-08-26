@@ -136,6 +136,20 @@
   --sidebar-ring: #ffd56b;
 }
 
+/*
+ * The listing import fills blank fields for you; this is how it says which
+ * ones it touched. Applied for three seconds by `add-listing-dialog.tsx`
+ * (which also sets `data-imported` for anything reading the DOM), then
+ * removed — there is no state to clear and nothing to dismiss.
+ *
+ * `!important` because it has to beat the `focus-visible:` and `aria-invalid:`
+ * branches already baked into the input variants.
+ */
+.import-flash {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 45%, transparent) !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

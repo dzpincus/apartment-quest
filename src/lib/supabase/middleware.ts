@@ -3,11 +3,25 @@ import { createServerClient } from "@supabase/ssr";
 import { supabaseEnv } from "./env";
 
 /**
+ * A signed-out request to an API route gets a 401 in JSON rather than a 307 to
+ * the login page: the caller is a `fetch`, and handing it an HTML login screen
+ * with a 200 means the client sees "unreadable response" instead of "sign in
+ * again". Same fail-closed decision, answered in the caller's language.
+ *
+ * The routes themselves check the session too — this is the outer guard, not
+ * the only one.
+ */
+function apiUnauthorized(error: string) {
+  return NextResponse.json({ error }, { status: 401 });
+}
+
+/**
  * Refreshes the auth session cookie and guards routes.
  * Called from `src/proxy.ts` (Next 16's renamed middleware).
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const isApi = request.nextUrl.pathname.startsWith("/api/");
 
   const { url, key } = supabaseEnv();
   // No env means no way to check the session, so fail closed: everything but
@@ -15,6 +29,7 @@ export async function updateSession(request: NextRequest) {
   // misconfigured deployment the whole app, which then threw the moment it
   // tried to build a Supabase client. `/login` still renders, and says so.
   if (!url || !key) {
+    if (isApi) return apiUnauthorized("Supabase isn't configured.");
     if (request.nextUrl.pathname === "/login") return response;
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";
@@ -51,6 +66,7 @@ export async function updateSession(request: NextRequest) {
   const isLogin = pathname === "/login";
 
   if (!user && !isLogin) {
+    if (isApi) return apiUnauthorized("Sign in first.");
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";
     redirect.search = "";

@@ -6,7 +6,7 @@ import { PersonDot } from "@/components/person-dot";
 import { usePerson } from "@/lib/person";
 import { Input } from "@/components/ui/input";
 import { SimpleSelect, type SelectOption } from "@/components/simple-select";
-import { AddListingDialog } from "@/components/listings/add-listing-dialog";
+import { AddListingDialogSlot } from "@/components/listings/add-listing-dialog";
 import { IncomesPopover } from "@/components/listings/incomes-popover";
 import {
   FEE_FILTER_OPTIONS,
@@ -77,7 +77,9 @@ export function ListingsToolbar({
         <span className="text-sm text-muted-foreground tabular-nums">{count}</span>
         <div className="ml-auto flex items-center gap-2">
           <IncomesPopover />
-          <AddListingDialog />
+          {/* Slot, not the dialog itself: it reads `?import=` and so has to
+              sit behind a Suspense boundary of its own. */}
+          <AddListingDialogSlot />
         </div>
       </div>
 
