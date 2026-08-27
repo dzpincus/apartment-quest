@@ -6,6 +6,7 @@ import {
   listingLabel,
   money,
   moneyShort,
+  rentShort,
   AC_LABELS,
   AC_MARKS,
   DISHWASHER_LABELS,
@@ -255,5 +256,29 @@ describe("label maps", () => {
     const kinds: InteractionKind[] = ["call", "email", "text", "tour", "note"];
     for (const kind of kinds) expect(INTERACTION_KIND_LABELS[kind]).toBeTruthy();
     expect(Object.keys(INTERACTION_KIND_LABELS)).toHaveLength(kinds.length);
+  });
+});
+
+describe("rentShort", () => {
+  it("keeps one decimal, so two rents do not round together", () => {
+    expect(rentShort(5_200)).toBe("$5.2k");
+    expect(rentShort(4_750)).toBe("$4.8k");
+    expect(rentShort(5_249)).toBe("$5.2k");
+  });
+
+  it("drops a trailing zero — $5k is a rent, $5.0k is a spreadsheet", () => {
+    expect(rentShort(5_000)).toBe("$5k");
+    expect(rentShort(1_000)).toBe("$1k");
+  });
+
+  it("prints small amounts and blanks like moneyShort does", () => {
+    expect(rentShort(999)).toBe("$999");
+    expect(rentShort(0)).toBe("$0");
+    expect(rentShort(null)).toBe("");
+    expect(rentShort(undefined)).toBe("");
+  });
+
+  it("groups the thousands once a rent is silly money", () => {
+    expect(rentShort(1_234_500)).toBe("$1,234.5k");
   });
 });

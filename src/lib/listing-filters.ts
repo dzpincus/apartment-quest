@@ -74,6 +74,12 @@ export type SortKey =
   | "broker"
   | "votes"
   | "next_action_due"
+  /**
+   * Transit minutes to *this device's* starred place (0010). Only offered when
+   * somebody has starred one — the column is hidden otherwise, and sorting by
+   * a column nobody can see is a table that reorders itself for no reason.
+   */
+  | "transitToPrimary"
   | "created_at";
 
 export type Sort = { key: SortKey; dir: "asc" | "desc" };
@@ -150,6 +156,25 @@ export function defaultSortDir(key: SortKey): "asc" | "desc" {
   return key === "votes" || key === "created_at" ? "desc" : "asc";
 }
 
+/**
+ * Seconds on transit from this listing to one saved place, or null when there
+ * is no usable answer — no starred place, no cached row, or a row Google
+ * refused (`error` set, `seconds` null). Null is what makes the cell print an
+ * em dash and the sort sink the row, which is the same thing an unanswered
+ * question does everywhere else in this table.
+ */
+export function transitSeconds(
+  row: Pick<ListingRow, "commute_times">,
+  locationId: Uuid | null,
+): number | null {
+  if (!locationId) return null;
+  const match = row.commute_times?.find(
+    (commute) => commute.location_id === locationId && commute.mode === "transit",
+  );
+  const seconds = match?.seconds;
+  return seconds != null && seconds > 0 ? seconds : null;
+}
+
 function num(raw: string): number | null {
   const n = Number(raw);
   return raw.trim() === "" || Number.isNaN(n) ? null : n;
@@ -187,7 +212,11 @@ export function applyFilters(
   });
 }
 
-function sortValue(row: ListingRow, key: SortKey): string | number | null {
+function sortValue(
+  row: ListingRow,
+  key: SortKey,
+  primaryLocationId: Uuid | null,
+): string | number | null {
   switch (key) {
     case "address":
       return `${row.address ?? ""} ${row.unit ?? ""}`.toLowerCase();
@@ -214,6 +243,10 @@ function sortValue(row: ListingRow, key: SortKey): string | number | null {
       return voteScore(row.votes);
     case "next_action_due":
       return row.next_action_due ?? null;
+    case "transitToPrimary":
+      // Seconds rather than the rounded minutes the cell shows: two listings a
+      // few seconds apart should still have a defined order.
+      return transitSeconds(row, primaryLocationId);
     case "created_at":
       return row.created_at ?? null;
     default:
@@ -221,12 +254,22 @@ function sortValue(row: ListingRow, key: SortKey): string | number | null {
   }
 }
 
-/** Blanks always sink to the bottom, whichever direction is active. */
-export function sortRows(rows: ListingRow[], sort: Sort): ListingRow[] {
+/**
+ * Blanks always sink to the bottom, whichever direction is active.
+ *
+ * `primaryLocationId` is only read by the `transitToPrimary` key and comes
+ * from `src/lib/prefs.ts` — a device preference, not a column, which is why it
+ * arrives as an argument instead of being looked up in here.
+ */
+export function sortRows(
+  rows: ListingRow[],
+  sort: Sort,
+  primaryLocationId: Uuid | null = null,
+): ListingRow[] {
   const factor = sort.dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
-    const va = sortValue(a, sort.key);
-    const vb = sortValue(b, sort.key);
+    const va = sortValue(a, sort.key, primaryLocationId);
+    const vb = sortValue(b, sort.key, primaryLocationId);
     if (va == null && vb == null) return 0;
     if (va == null) return 1;
     if (vb == null) return -1;

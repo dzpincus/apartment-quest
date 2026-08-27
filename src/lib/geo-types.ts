@@ -109,3 +109,35 @@ export function commuteMinutes(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return "—";
   return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
+
+// -- reading a pin ------------------------------------------------------------
+
+/**
+ * What the four geo columns add up to, for the three surfaces that draw a pin.
+ *
+ * `geocode_note` is provenance, not status (CLAUDE.md), so the *status* has to
+ * be derived: a null `lat` with a `failed:` note means we looked and nobody
+ * could place it; a null `lat` with no note means nobody has looked yet, which
+ * is the only state worth offering a "Locate" button for. A `low-confidence`
+ * note on a real pin is a placed listing wearing a "⚠ check pin".
+ */
+export type PinStatus = "placed" | "check" | "failed" | "unplaced";
+
+export function pinStatus(row: {
+  lat?: number | null;
+  lng?: number | null;
+  geocode_note?: string | null;
+}): PinStatus {
+  const note = row.geocode_note?.trim().toLowerCase() ?? "";
+  if (row.lat == null || row.lng == null) {
+    return note.startsWith("failed:") ? "failed" : "unplaced";
+  }
+  return note.startsWith("low-confidence") ? "check" : "placed";
+}
+
+/** The reason a geocode failed, in the provider's words. Null when it did not. */
+export function geocodeFailure(note: string | null | undefined): string | null {
+  const raw = note?.trim() ?? "";
+  if (!/^failed:/i.test(raw)) return null;
+  return raw.slice("failed:".length).trim() || "No provider could place it.";
+}

@@ -22,9 +22,18 @@ import { ListingThumb } from "@/components/listings/listing-thumb";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useUnread, type ListingRow } from "@/lib/queries";
-import { defaultSortDir, type Sort, type SortKey } from "@/lib/listing-filters";
+import {
+  defaultSortDir,
+  transitSeconds,
+  type Sort,
+  type SortKey,
+} from "@/lib/listing-filters";
+import { usePerson } from "@/lib/person";
+import { usePrimaryLocationId } from "@/lib/prefs";
+import { commuteMinutes } from "@/lib/geo-types";
 import { money } from "@/lib/format";
 import { fmtDay } from "@/lib/time";
+import type { Uuid } from "@/lib/types";
 
 const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "address", label: "Address" },
@@ -41,6 +50,24 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "next_action_due", label: "Next action" },
 ];
 
+/**
+ * The starred place's transit column, inserted after Votes and *only* when
+ * this device has starred somewhere (0010). The table's columns are a budget:
+ * a column of em dashes for a preference nobody set is the kind of thing that
+ * pushes the address into an ellipsis.
+ */
+const TRANSIT_COLUMN: { key: SortKey; label: string; className?: string } = {
+  key: "transitToPrimary",
+  label: "⭐ Transit",
+  className: "text-right whitespace-nowrap",
+};
+
+function columns(hasPrimary: boolean) {
+  if (!hasPrimary) return COLUMNS;
+  const at = COLUMNS.findIndex((col) => col.key === "votes");
+  return [...COLUMNS.slice(0, at + 1), TRANSIT_COLUMN, ...COLUMNS.slice(at + 1)];
+}
+
 export function ListingsTable({
   rows,
   incomes,
@@ -53,6 +80,8 @@ export function ListingsTable({
   onSortChange: (sort: Sort) => void;
 }) {
   const unread = useUnread();
+  const { person } = usePerson();
+  const primaryId = usePrimaryLocationId(person?.id);
 
   function toggle(key: SortKey) {
     onSortChange(
@@ -66,7 +95,7 @@ export function ListingsTable({
     <Table className="text-sm">
       <TableHeader>
         <TableRow>
-          {COLUMNS.map((col) => (
+          {columns(Boolean(primaryId)).map((col) => (
             <TableHead
               key={col.key}
               className={col.className}
@@ -104,6 +133,7 @@ export function ListingsTable({
             row={row}
             incomes={incomes}
             unread={unread.byListing[row.id] ?? 0}
+            primaryLocationId={primaryId}
           />
         ))}
       </TableBody>
@@ -115,10 +145,13 @@ function Row({
   row,
   incomes,
   unread,
+  primaryLocationId,
 }: {
   row: ListingRow;
   incomes: ReadonlyArray<number | null | undefined>;
   unread: number;
+  /** Null when nobody starred a place — then there is no column to fill. */
+  primaryLocationId: Uuid | null;
 }) {
   const save = useRowEdit(row);
 
@@ -224,6 +257,22 @@ function Row({
       <TableCell>
         <VoteChips votes={row.votes} />
       </TableCell>
+
+      {/* Transit to the starred place. A cached answer or an em dash — this
+          cell never asks Google anything; "Refresh times" on the detail page
+          is the only thing that spends. */}
+      {primaryLocationId && (
+        <TableCell className="text-right tabular-nums whitespace-nowrap">
+          {(() => {
+            const seconds = transitSeconds(row, primaryLocationId);
+            return seconds == null ? (
+              <span className="text-faint">—</span>
+            ) : (
+              commuteMinutes(seconds)
+            );
+          })()}
+        </TableCell>
+      )}
 
       <TableCell className="max-w-36 truncate">
         {row.broker ? (

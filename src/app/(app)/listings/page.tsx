@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { ListingsToolbar } from "@/components/listings/listings-toolbar";
 import { ListingsTable } from "@/components/listings/listings-table";
 import { ListingCards } from "@/components/listings/listing-cards";
@@ -8,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useListings } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
 import { humans } from "@/lib/people";
+import { useListingsView, usePrimaryLocationId } from "@/lib/prefs";
 import {
   applyFilters,
   EMPTY_FILTERS,
@@ -17,9 +19,23 @@ import {
   type Sort,
 } from "@/lib/listing-filters";
 
+/**
+ * The map — and `maplibre-gl` with it, a quarter of a megabyte — is fetched
+ * the first time somebody flips to it and never on the list view. `ssr: false`
+ * because MapLibre wants a real canvas; the skeleton is what the toggle
+ * animates into.
+ */
+const MapPanel = dynamic(() => import("@/components/map/map-panel").then((m) => m.MapPanel), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[60dvh] w-full rounded-[20px]" />,
+});
+
 export default function ListingsPage() {
   const { person, people } = usePerson();
   const { data: listings = [], isPending, error } = useListings();
+  const [view, setView] = useListingsView();
+  // The starred place is a device preference; only the transit column reads it.
+  const primaryLocationId = usePrimaryLocationId(person?.id);
 
   // Filters are ephemeral view state — no need to survive a reload.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -32,8 +48,13 @@ export default function ListingsPage() {
   const hoods = useMemo(() => neighborhoods(listings), [listings]);
   // `person?.id` only matters to the "my vote" filter; everything else ignores it.
   const rows = useMemo(
-    () => sortRows(applyFilters(listings, filters, person?.id ?? null), sort),
-    [listings, filters, sort, person?.id],
+    () =>
+      sortRows(
+        applyFilters(listings, filters, person?.id ?? null),
+        sort,
+        primaryLocationId,
+      ),
+    [listings, filters, sort, person?.id, primaryLocationId],
   );
 
   return (
@@ -45,6 +66,8 @@ export default function ListingsPage() {
         onSortChange={setSort}
         neighborhoodOptions={hoods}
         count={rows.length}
+        view={view}
+        onViewChange={setView}
       />
 
       {error && (
@@ -65,6 +88,10 @@ export default function ListingsPage() {
             ? "Nothing here yet. Add the first listing."
             : "No listings match these filters."}
         </p>
+      ) : view === "map" ? (
+        // The same `rows` the table would have drawn — filtered, sorted and
+        // already in memory. The map never filters.
+        <MapPanel rows={rows} />
       ) : (
         <>
           <div className="hidden md:block">

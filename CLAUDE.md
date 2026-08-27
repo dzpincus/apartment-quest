@@ -392,7 +392,7 @@ are free or nearly so, and the expensive one is metered on purpose.
 
 | Job | Provider | Cost | Key |
 |---|---|---|---|
-| Tiles / map rendering | MapLibre GL JS + **OpenFreeMap** (`tiles.openfreemap.org/styles/liberty`) | $0 | none |
+| Tiles / map rendering | MapLibre GL JS + **OpenFreeMap** (`tiles.openfreemap.org/styles/dark`, repainted Dusk Candy) | $0 | none |
 | Geocoding | **NYC GeoSearch** (`geosearch.planninglabs.nyc`, Pelias, NYC-only), fallback **Nominatim** | $0 | none |
 | Walk / bike / transit durations | **Google Routes API** `computeRoutes` | free tier 10k calls/mo | `GOOGLE_MAPS_API_KEY`, server-only |
 | Subway stations | NYC Open Data / MTA export, bundled at `public/data/subway-stations.geojson` | $0 | none, no request |
@@ -497,6 +497,55 @@ column, the map's mini card and the detail card all read from a query that
 already runs — the same argument votes and photos won. `useCommutes(id)` is
 `useListing(id)` with a `select`, i.e. one cache entry, and `commuteIndex` turns
 the array into `location → mode → row`.
+
+**The basemap is OpenFreeMap's `dark`, repainted.** `src/components/map/map-style.ts` fetches it once per session and runs `duskCandy()` over every
+`paint` block: colours are parsed (hex, `rgb()`, the style's own `rgb(27 ,27
+,29)`, `hsl`, and inside `interpolate` expressions), mapped by *lightness* onto
+the palette — black to `#1a1836`, water to `#26235a`, road casings to
+`#3c3778`, labels to `#b3aee0` — and written back with their alpha intact.
+Background, water and label layers are pinned rather than ramped, because
+OpenFreeMap's labels are near-black on grey and unreadable the moment the land
+under them stops being white. A transform rather than a checked-in 900-line
+JSON file: upstream can add a layer without us shipping a style that rots.
+
+**The map is never on the listings page's critical path.** `maplibre-gl` is
+~250KB gzipped, so `MapPanel` (which pulls in `ListingsMap`, which pulls in
+MapLibre) and the detail card's `MiniMap` are both `next/dynamic` with
+`ssr: false`. The chunk is fetched the first time somebody flips to Map and
+never on the list. MapLibre's stylesheet is imported *inside* those components
+rather than in `globals.css`, and the pins' own CSS is a `<style>` tag injected
+by `ensureMapCss()` on first mount — no route pays for a rule about `.aq-pin`
+until it has actually asked for a map.
+
+**Pins are DOM, not symbol layers.** Sixty listings is far below where a
+GeoJSON source, an icon sprite and `queryRenderedFeatures` would pay for
+themselves, and `Marker({ element })` gets focus rings, `aria-label`s and a
+person's `people.color` as an inline style for free (`pin.ts`). The rent on a
+pin is `rentShort` (`$5.2k`), not `moneyShort` (`$5k`): whole thousands round
+two different apartments to the same label, which is fine in a qualification
+badge and useless on a map. Selection is a
+`data-selected` flip on an element that already exists, not a rebuilt marker,
+so tapping around never makes the map blink. Fit-bounds fires when *which*
+listings are on screen changes and not when the selection does — a map that
+re-frames itself while somebody reads a card is arguing with them. Station dots
+are drawn for the viewport at zoom >= 14 only, because 445 of them city-wide is
+a grey wash.
+
+**List or map is a device preference too** — `aq.listingsView` in `prefs.ts`,
+same guarded store as the location toggles, defaulting to the list on the
+server so the toolbar never flashes the wrong control. Map mode is handed the
+*same* `rows` array the table gets, already filtered and sorted, so the pins and
+the list cannot disagree. "N unlocated · Locate all" calls the module-level
+`geocodeListing` in series rather than the `useMutations` hook — the hook owns a
+loading toast per call, which is right for one button and a toast storm for
+sixty — then fills every newly computable pair with a single `computeCommutes({})`.
+
+**"Transit to ⭐" is a column that mostly is not there.** It appears in the
+table (after Votes), in the mobile cards and in the sort list only when this
+device has starred a place; `transitSeconds(row, locationId)` reads the
+embedded `commute_times`, returns null for a missing or errored pair, and the
+sort sinks nulls like every other column. It never asks Google anything —
+"Refresh times" on the detail card is the only button that spends.
 
 ## Design system — "Dusk Candy"
 

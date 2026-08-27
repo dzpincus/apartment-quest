@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   hiddenKey,
+  LISTINGS_VIEW_KEY,
+  listingsView,
+  setListingsView,
   hiddenLocationIds,
   primaryKey,
   primaryLocationId,
@@ -155,5 +158,25 @@ describe("no window", () => {
     expect(primaryLocationId(REESE)).toBeNull();
     // And a write is a no-op, not a crash.
     expect(() => setPrimaryLocation(REESE, WORK)).not.toThrow();
+  });
+});
+
+describe("listings view", () => {
+  it("is the list until somebody says otherwise", () => {
+    expect(listingsView()).toBe("list");
+  });
+
+  it("remembers the map", () => {
+    setListingsView("map");
+    expect(listingsView()).toBe("map");
+    expect(win.__store.get(LISTINGS_VIEW_KEY)).toBe("map");
+  });
+
+  it("stores nothing for the default, and ignores junk", () => {
+    setListingsView("map");
+    setListingsView("list");
+    expect(win.__store.has(LISTINGS_VIEW_KEY)).toBe(false);
+    win.__store.set(LISTINGS_VIEW_KEY, "globe");
+    expect(listingsView()).toBe("list");
   });
 });

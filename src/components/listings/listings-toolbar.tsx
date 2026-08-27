@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { List, Map as MapIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PersonDot } from "@/components/person-dot";
 import { usePerson } from "@/lib/person";
@@ -25,7 +25,9 @@ import {
   type Sort,
   type SortKey,
 } from "@/lib/listing-filters";
+import { usePrimaryLocationId, type ListingsView } from "@/lib/prefs";
 import { VOTE_LABELS, type MyVoteFilter } from "@/lib/votes";
+import { cn } from "@/lib/utils";
 import type {
   AcPolicy,
   DishwasherPolicy,
@@ -45,6 +47,10 @@ const MY_VOTE_OPTIONS: SelectOption<MyVoteFilter>[] = [
   { value: "none", label: "Not voted" },
 ];
 
+/**
+ * The mobile sort list. "Transit to ⭐" is appended only when this device has
+ * starred a place — see `sortOptions` below.
+ */
 const SORT_OPTIONS: SelectOption<SortKey>[] = [
   { value: "created_at", label: "Newest" },
   { value: "rent", label: "Rent" },
@@ -58,6 +64,12 @@ const SORT_OPTIONS: SelectOption<SortKey>[] = [
   { value: "next_action_due", label: "Next action due" },
 ];
 
+function sortOptions(hasPrimary: boolean): SelectOption<SortKey>[] {
+  return hasPrimary
+    ? [...SORT_OPTIONS, { value: "transitToPrimary", label: "Transit to ⭐" }]
+    : SORT_OPTIONS;
+}
+
 export function ListingsToolbar({
   filters,
   onFiltersChange,
@@ -65,6 +77,8 @@ export function ListingsToolbar({
   onSortChange,
   neighborhoodOptions,
   count,
+  view,
+  onViewChange,
 }: {
   filters: Filters;
   onFiltersChange: (filters: Filters) => void;
@@ -72,11 +86,15 @@ export function ListingsToolbar({
   onSortChange: (sort: Sort) => void;
   neighborhoodOptions: string[];
   count: number;
+  /** List or map. Persisted per device in `prefs.ts`, not in the URL. */
+  view: ListingsView;
+  onViewChange: (view: ListingsView) => void;
 }) {
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     onFiltersChange({ ...filters, [key]: value });
 
-  const { people } = usePerson();
+  const { person, people } = usePerson();
+  const primaryId = usePrimaryLocationId(person?.id);
 
   const hoods: SelectOption[] = [
     { value: "all", label: "Any neighborhood" },
@@ -89,6 +107,7 @@ export function ListingsToolbar({
         <h1 className="text-[26px] leading-tight md:text-2xl">Listings</h1>
         <span className="text-sm text-muted-foreground tabular-nums">{count}</span>
         <div className="ml-auto flex items-center gap-2">
+          <ViewToggle view={view} onViewChange={onViewChange} />
           <IncomesPopover />
           {/* Slot, not the dialog itself: it reads `?import=` and so has to
               sit behind a Suspense boundary of its own. */}
@@ -194,7 +213,7 @@ export function ListingsToolbar({
         <SimpleSelect<SortKey>
           className="w-40 md:hidden"
           value={sort.key}
-          options={SORT_OPTIONS}
+          options={sortOptions(Boolean(primaryId))}
           onValueChange={(key) => onSortChange({ key, dir: defaultSortDir(key) })}
           aria-label="Sort by"
         />
@@ -209,6 +228,49 @@ export function ListingsToolbar({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * List or map, as one segmented control. Two 44px targets rather than a select:
+ * this is the switch people flip most often on a phone, and a two-option
+ * dropdown costs a tap to *see* the options.
+ */
+function ViewToggle({
+  view,
+  onViewChange,
+}: {
+  view: ListingsView;
+  onViewChange: (view: ListingsView) => void;
+}) {
+  const options = [
+    { value: "list" as const, label: "List", Icon: List },
+    { value: "map" as const, label: "Map", Icon: MapIcon },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="How to show the listings"
+      className="inline-flex items-center gap-0.5 rounded-full border-2 border-border bg-card p-0.5"
+    >
+      {options.map(({ value, label, Icon }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onViewChange(value)}
+          aria-pressed={view === value}
+          className={cn(
+            "inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-[13px] font-extrabold md:h-7 md:px-2.5 md:text-xs",
+            view === value
+              ? "bg-primary text-ink"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Icon className="size-4" />
+          {label}
+        </button>
+      ))}
     </div>
   );
 }

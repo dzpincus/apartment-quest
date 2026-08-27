@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   commuteMinutes,
   emptyCommutes,
+  geocodeFailure,
   mapsDirectionsUrl,
+  pinStatus,
   COMMUTE_MAX_AGE_MS,
 } from "./geo-types";
 
@@ -69,5 +71,47 @@ describe("emptyCommutes", () => {
 describe("COMMUTE_MAX_AGE_MS", () => {
   it("is thirty days", () => {
     expect(COMMUTE_MAX_AGE_MS).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe("pinStatus", () => {
+  it("is placed when there are coordinates and nothing to worry about", () => {
+    expect(pinStatus({ lat: 40.7, lng: -73.9, geocode_note: "nyc-geosearch" })).toBe("placed");
+    expect(pinStatus({ lat: 40.7, lng: -73.9, geocode_note: "manual" })).toBe("placed");
+    expect(pinStatus({ lat: 40.7, lng: -73.9, geocode_note: null })).toBe("placed");
+  });
+
+  it("asks for a human glance when the match was a guess", () => {
+    expect(
+      pinStatus({ lat: 40.7, lng: -73.9, geocode_note: "low-confidence (nyc-geosearch)" }),
+    ).toBe("check");
+    expect(pinStatus({ lat: 40.7, lng: -73.9, geocode_note: "Low-Confidence (nominatim)" })).toBe(
+      "check",
+    );
+  });
+
+  it("tells 'we looked and failed' apart from 'nobody has looked'", () => {
+    expect(pinStatus({ lat: null, lng: null, geocode_note: "failed: no match" })).toBe("failed");
+    expect(pinStatus({ lat: null, lng: null, geocode_note: null })).toBe("unplaced");
+    expect(pinStatus({ lat: null, lng: null, geocode_note: "   " })).toBe("unplaced");
+    // Half a pin is no pin.
+    expect(pinStatus({ lat: 40.7, lng: null, geocode_note: null })).toBe("unplaced");
+  });
+
+  it("reads an empty row as unplaced rather than throwing", () => {
+    expect(pinStatus({})).toBe("unplaced");
+  });
+});
+
+describe("geocodeFailure", () => {
+  it("unwraps the provider's reason", () => {
+    expect(geocodeFailure("failed: no match in NYC or OSM")).toBe("no match in NYC or OSM");
+    expect(geocodeFailure("failed:")).toBe("No provider could place it.");
+  });
+
+  it("is null for a note that is not a failure", () => {
+    expect(geocodeFailure("nyc-geosearch")).toBeNull();
+    expect(geocodeFailure(null)).toBeNull();
+    expect(geocodeFailure(undefined)).toBeNull();
   });
 });

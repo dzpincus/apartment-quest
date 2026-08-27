@@ -18,6 +18,23 @@ export function moneyShort(n: number | null | undefined): string {
   return `$${Math.round(n / 1000).toLocaleString("en-US")}k`;
 }
 
+/**
+ * `$5.2k` — for a map pin, where the rent has to fit beside a dot and
+ * `moneyShort`'s whole thousands would round two different apartments to the
+ * same number. One decimal, and never a trailing `.0`: `$5k` is a rent, `$5.0k`
+ * is a spreadsheet. Below $1,000 it prints in full, exactly like `moneyShort`.
+ */
+export function rentShort(n: number | null | undefined): string {
+  if (n == null) return "";
+  if (Math.abs(n) < 1000) return usd.format(n);
+  const thousands = Math.round(n / 100) / 10;
+  const digits = Number.isInteger(thousands) ? 0 : 1;
+  return `$${thousands.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}k`;
+}
+
 /** `2 bd / 1.5 ba`, skipping whichever half is missing. */
 export function bedsBaths(
   beds: number | null | undefined,

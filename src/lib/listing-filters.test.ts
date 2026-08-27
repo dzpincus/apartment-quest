@@ -7,10 +7,11 @@ import {
   hasActiveFilters,
   neighborhoods,
   sortRows,
+  transitSeconds,
   type Filters,
   type SortKey,
 } from "./listing-filters";
-import type { ListingRow, VoteRow } from "./queries";
+import type { CommuteRef, ListingRow, VoteRow } from "./queries";
 import type { FeeType, ListingStatus, VoteValue } from "./types";
 
 const ME = "person-me";
@@ -666,5 +667,80 @@ describe("filter then sort", () => {
       ME,
     );
     expect(ids(sortRows(filtered, { key: "rent", dir: "asc" }))).toEqual(["b", "a"]);
+  });
+});
+
+
+// -- transit to the starred place (0010) --------------------------------------
+
+const WORK = "location-work";
+const GYM = "location-gym";
+
+function commute(
+  locationId: string,
+  mode: CommuteRef["mode"],
+  seconds: number | null,
+  error: string | null = null,
+): CommuteRef {
+  return { location_id: locationId, mode, seconds, meters: null, error };
+}
+
+describe("transitSeconds", () => {
+  it("finds the transit row for one place and ignores the others", () => {
+    const listing = row({
+      id: "a",
+      commute_times: [
+        commute(WORK, "walk", 3_000),
+        commute(WORK, "transit", 1_260),
+        commute(GYM, "transit", 400),
+      ],
+    });
+    expect(transitSeconds(listing, WORK)).toBe(1_260);
+    expect(transitSeconds(listing, GYM)).toBe(400);
+  });
+
+  it("is null with no starred place, no row, or a row Google refused", () => {
+    const listing = row({
+      id: "a",
+      commute_times: [commute(WORK, "transit", null, "ZERO_RESULTS")],
+    });
+    expect(transitSeconds(listing, null)).toBeNull();
+    expect(transitSeconds(listing, GYM)).toBeNull();
+    expect(transitSeconds(listing, WORK)).toBeNull();
+    expect(transitSeconds(row({ id: "b" }), WORK)).toBeNull();
+  });
+});
+
+describe("sortRows — transitToPrimary", () => {
+  const near = row({ id: "near", commute_times: [commute(WORK, "transit", 600)] });
+  const far = row({ id: "far", commute_times: [commute(WORK, "transit", 2_400)] });
+  const unknown = row({ id: "unknown", commute_times: [] });
+  const refused = row({
+    id: "refused",
+    commute_times: [commute(WORK, "transit", null, "quota")],
+  });
+  const rows = [far, unknown, near, refused];
+
+  it("puts the shortest ride first", () => {
+    expect(ids(sortRows(rows, { key: "transitToPrimary", dir: "asc" }, WORK))).toEqual([
+      "near",
+      "far",
+      "unknown",
+      "refused",
+    ]);
+  });
+
+  it("keeps the unanswered ones at the bottom in both directions", () => {
+    const desc = ids(sortRows(rows, { key: "transitToPrimary", dir: "desc" }, WORK));
+    expect(desc.slice(0, 2)).toEqual(["far", "near"]);
+    expect(desc.slice(2).sort()).toEqual(["refused", "unknown"]);
+  });
+
+  it("leaves the order alone when nobody has starred a place", () => {
+    expect(ids(sortRows(rows, { key: "transitToPrimary", dir: "asc" }))).toEqual(ids(rows));
+  });
+
+  it("sorts shortest-first on the first click", () => {
+    expect(defaultSortDir("transitToPrimary")).toBe("asc");
   });
 });

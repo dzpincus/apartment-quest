@@ -12,6 +12,10 @@ import { AmenityMarks, amenityMarks } from "@/components/listings/amenity-marks"
 import { ListingThumb } from "@/components/listings/listing-thumb";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { useUnread, type ListingRow } from "@/lib/queries";
+import { usePerson } from "@/lib/person";
+import { usePrimaryLocationId } from "@/lib/prefs";
+import { transitSeconds } from "@/lib/listing-filters";
+import { commuteMinutes } from "@/lib/geo-types";
 import { FEE_TYPE_LABELS, bedsBaths, listingLabel, money } from "@/lib/format";
 
 /**
@@ -29,11 +33,15 @@ export function ListingCards({
   incomes: ReadonlyArray<number | null | undefined>;
 }) {
   const unread = useUnread();
+  const { person } = usePerson();
+  // Only drawn when this device starred a place — see `prefs.ts`.
+  const primaryId = usePrimaryLocationId(person?.id);
 
   return (
     <div className="grid gap-3">
       {rows.map((row) => {
         const color = row.added_by_person?.color ?? "#888";
+        const transit = transitSeconds(row, primaryId);
         return (
           <div
             key={row.id}
@@ -89,7 +97,20 @@ export function ListingCards({
 
             {/* Amenities as their own chips: on a phone this is the line that
                 decides whether the listing is worth opening. */}
-            {amenityMarks(row).length > 0 && <AmenityMarks listing={row} variant="chips" />}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {amenityMarks(row).length > 0 && <AmenityMarks listing={row} variant="chips" />}
+              {/* Transit to the starred place: a cached number, never a
+                  request. Absent rather than an em dash — a phone card should
+                  not carry a blank. */}
+              {transit != null && (
+                <span
+                  className="inline-flex h-6 items-center rounded-full bg-inset px-2 text-[11px] font-black text-muted-foreground tabular-nums"
+                  title="Transit to your starred place"
+                >
+                  ⭐ {commuteMinutes(transit)}
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <PetsMark pets={row.pets} notes={row.pet_notes} />

@@ -163,3 +163,40 @@ export function visibleLocations<T extends { id: Uuid }>(
 ): T[] {
   return (locations ?? []).filter((location) => !hidden.has(location.id));
 }
+
+// -- how the listings page is shown ------------------------------------------
+
+/**
+ * List or map, per device. Not a URL parameter and not React state: a person
+ * who thinks in pins should get pins on Tuesday too, and a shared link should
+ * open in whatever *the reader* prefers.
+ *
+ * Same guarded read as the toggles above — a browser that refuses localStorage
+ * gets the list, which is the mode that works without a network.
+ */
+export const LISTINGS_VIEW_KEY = "aq.listingsView";
+
+export type ListingsView = "list" | "map";
+
+const isView = (raw: string | null): raw is ListingsView =>
+  raw === "list" || raw === "map";
+
+export function listingsView(): ListingsView {
+  const raw = read(LISTINGS_VIEW_KEY);
+  return isView(raw) ? raw : "list";
+}
+
+export function setListingsView(view: ListingsView): void {
+  write(LISTINGS_VIEW_KEY, view === "list" ? null : view);
+}
+
+/**
+ * `[view, setView]`, live across tabs. The server snapshot is `"list"`: the
+ * map is a client-only component behind `next/dynamic`, and rendering the
+ * toolbar as if it were already open would flash the wrong control.
+ */
+export function useListingsView(): [ListingsView, (view: ListingsView) => void] {
+  const view = useSyncExternalStore(subscribe, listingsView, () => "list" as const);
+  const set = useCallback((next: ListingsView) => setListingsView(next), []);
+  return [view, set];
+}

@@ -13,6 +13,7 @@ import { PersonDot } from "@/components/person-dot";
 import { UnreadBadge } from "@/components/unread-badge";
 import { Thread } from "@/components/chat/thread";
 import { BrokerCard } from "@/components/listings/broker-card";
+import { CommuteCard } from "@/components/listings/commute-card";
 import { InteractionsCard } from "@/components/listings/interactions-card";
 import { NextActionCard } from "@/components/listings/next-action-card";
 import { MergeIntoDialog } from "@/components/listings/merge-into-dialog";
@@ -423,6 +424,10 @@ function ListingDetailView({
           </div>
         </CardContent>
       </Card>
+
+      {/* Where it is and how long it takes to get anywhere — above the broker,
+          because it is the question people ask before they call. */}
+      <CommuteCard listing={listing} />
 
       <BrokerCard listing={listing} />
 
