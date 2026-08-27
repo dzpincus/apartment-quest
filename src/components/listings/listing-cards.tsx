@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { PersonDot } from "@/components/person-dot";
@@ -8,7 +9,8 @@ import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { AmenityMarks, amenityMarks } from "@/components/listings/amenity-marks";
-import { ListingThumb } from "@/components/listings/listing-thumb";
+import { PhotoCarousel } from "@/components/listings/photo-carousel";
+import { PhotoLightbox } from "@/components/listings/photo-lightbox";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { PoweredByGoogle } from "@/components/listings/powered-by-google";
 import { useLocations, useUnread, type ListingRow } from "@/lib/queries";
@@ -49,6 +51,10 @@ export function ListingCards({
   const { data: locations } = useLocations();
   // Only drawn when this device starred a place that still exists — `prefs.ts`.
   const primaryId = usePrimaryLocationId(person?.id, locations);
+  // One lightbox for the whole list, not one per card: sixty dialogs mounted
+  // to show at most one is sixty subscriptions to the escape key.
+  const [lightbox, setLightbox] = useState<{ id: string; index: number } | null>(null);
+  const open = lightbox ? rows.find((row) => row.id === lightbox.id) : undefined;
 
   return (
     <div className="grid gap-3">
@@ -72,20 +78,26 @@ export function ListingCards({
             className="grid min-w-0 gap-2.5 overflow-hidden rounded-[20px] border-2 bg-card p-3.5 shadow-[0_6px_0_rgba(0,0,0,0.25)]"
             style={{ borderColor: color }}
           >
+            {/* Outside the <Link>, for the same reason the gone badge is: it
+                owns pointer gestures and opens a dialog, and neither survives
+                being wrapped in an anchor. The card's whole width, above the
+                title — the arrows sit inside the picture, so they can never
+                land on the address underneath it. */}
+            <PhotoCarousel
+              photos={row.photos ?? []}
+              alt={listingLabel(row.address, row.unit)}
+              onOpen={(index) => setLightbox({ id: row.id, index })}
+            />
+
             {/* The address is the one thing that may wrap: "913 Saint John's
                 Place #1R" is wider than the space left on a 412px phone once
-                the thumbnail and the rent are paid for, and half an address is
-                worse than two lines of one. Everything to its right is
-                `shrink-0` so the rent can never be shaved to "$4,35". */}
+                the rent is paid for, and half an address is worse than two
+                lines of one. Everything to its right is `shrink-0` so the rent
+                can never be shaved to "$4,35". */}
             <Link
               href={`/listings/${row.id}`}
               className="flex min-w-0 items-start gap-3"
             >
-              <ListingThumb
-                photo={row.photos?.[0]}
-                alt=""
-                className="size-16 self-center"
-              />
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-start gap-1.5 text-[17px] font-black">
                   <span className="min-w-0 line-clamp-2 break-words">
@@ -180,6 +192,20 @@ export function ListingCards({
           which Google's terms allow only with this credit. It comes and goes
           with the starred place, exactly like the chips do. */}
       {primaryId && <PoweredByGoogle className="text-center" />}
+
+      {/* Tapping a card's picture opens the same viewer the detail page uses —
+          arrow keys, swipe and a counter, already written. The carousel has
+          prefetched the set by the time a tap can happen, so it opens on a
+          cached image rather than on a grey box. */}
+      {open && (
+        <PhotoLightbox
+          photos={open.photos ?? []}
+          index={lightbox?.index ?? null}
+          label={listingLabel(open.address, open.unit)}
+          onIndexChange={(index) => setLightbox((was) => (was ? { ...was, index } : was))}
+          onOpenChange={(next) => !next && setLightbox(null)}
+        />
+      )}
     </div>
   );
 }

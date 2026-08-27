@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { ListingsMap, MapChip, MAP_CHIP_CLASS } from "@/components/map/listings-map";
 import { LocationsDialog } from "@/components/listings/locations-dialog";
 import { AmenityMarks } from "@/components/listings/amenity-marks";
+import { PhotoCarousel } from "@/components/listings/photo-carousel";
+import { PhotoLightbox } from "@/components/listings/photo-lightbox";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { VoteChips } from "@/components/listings/vote-chips";
 import { PersonDot } from "@/components/person-dot";
@@ -216,13 +218,28 @@ export function MapPanel({ rows }: { rows: ListingRow[] }) {
 /** The card a tapped pin raises. Everything the table row says, in one box. */
 function MiniCard({ listing, onClose }: { listing: ListingRow; onClose: () => void }) {
   const color = listing.added_by_person?.color ?? "#888";
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  const label = listingLabel(listing.address, listing.unit);
   return (
     <div
       className="absolute inset-x-2 bottom-2 z-20 grid min-w-0 gap-2 overflow-hidden rounded-[20px] border-2 bg-card p-3 shadow-[0_6px_0_rgba(0,0,0,0.35)] md:inset-x-auto md:right-3 md:bottom-3 md:w-80"
       style={{ borderColor: color }}
       role="dialog"
-      aria-label={listingLabel(listing.address, listing.unit)}
+      aria-label={label}
     >
+      {/* 16/9 rather than the cards' 16/10, and drawn only when there *are*
+          photos: this card floats over the map, so every row of it costs a row
+          of New York, and there is no column of neighbours here for a
+          placeholder tile to stay aligned with. */}
+      {listing.photos.length > 0 && (
+        <PhotoCarousel
+          photos={listing.photos}
+          alt={label}
+          aspect="16/9"
+          onOpen={setLightbox}
+        />
+      )}
+
       {/* Same rule as the listing cards: the address wraps, the rent never
           shrinks. This card is only 8px narrower than the phone. */}
       <div className="flex min-w-0 items-start gap-2">
@@ -270,6 +287,14 @@ function MiniCard({ listing, onClose }: { listing: ListingRow; onClose: () => vo
           Close
         </button>
       </div>
+
+      <PhotoLightbox
+        photos={listing.photos}
+        index={lightbox}
+        label={label}
+        onIndexChange={setLightbox}
+        onOpenChange={(next) => !next && setLightbox(null)}
+      />
     </div>
   );
 }

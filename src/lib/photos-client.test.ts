@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { photoUrl, PHOTO_BUCKET } from "./photos-client";
+import { photoUrl, prefetchPhotos, PHOTO_BUCKET } from "./photos-client";
 import { sortPhotos } from "./queries";
 import type { PhotoRef } from "./queries";
 
@@ -62,6 +62,57 @@ describe("photoUrl", () => {
     expect(photoUrl("")).toBe("");
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     expect(photoUrl("x/y.webp")).toBe("");
+  });
+});
+
+describe("prefetchPhotos", () => {
+  /** Node has no `Image`; the carousel's browser has one, so stand one in. */
+  function withImageStub<T>(run: () => T): { result: T; requested: string[] } {
+    const requested: string[] = [];
+    const previous = (globalThis as { Image?: unknown }).Image;
+    (globalThis as { Image?: unknown }).Image = class {
+      set src(value: string) {
+        requested.push(value);
+      }
+    };
+    try {
+      return { result: run(), requested };
+    } finally {
+      if (previous === undefined) delete (globalThis as { Image?: unknown }).Image;
+      else (globalThis as { Image?: unknown }).Image = previous;
+    }
+  }
+
+  it("asks for the main image of every photo, in order", () => {
+    // The 1280px rendition, not the thumbnail: this runs the moment somebody
+    // starts swiping, and what they are about to see is the big one.
+    const photos = [photo("a", 0), photo("b", 1)];
+    const { result, requested } = withImageStub(() => prefetchPhotos(photos));
+    expect(result).toEqual([
+      `${BASE}/storage/v1/object/public/${PHOTO_BUCKET}/${LISTING}/a.webp`,
+      `${BASE}/storage/v1/object/public/${PHOTO_BUCKET}/${LISTING}/b.webp`,
+    ]);
+    expect(requested).toEqual(result);
+  });
+
+  it("drops photos that cannot become a URL rather than fetching the page", () => {
+    // `photoUrl` returns "" with no env var, and `new Image().src = ""` is a
+    // request for the current document.
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const { result, requested } = withImageStub(() => prefetchPhotos([photo("a", 0)]));
+    expect(result).toEqual([]);
+    expect(requested).toEqual([]);
+  });
+
+  it("is a no-op on an empty or absent set", () => {
+    expect(prefetchPhotos([])).toEqual([]);
+    expect(prefetchPhotos(null)).toEqual([]);
+    expect(prefetchPhotos(undefined)).toEqual([]);
+  });
+
+  it("builds the URLs without an `Image` to load them into", () => {
+    // Server render, or a test: it must not throw on the way past.
+    expect(prefetchPhotos([photo("a", 0)])).toHaveLength(1);
   });
 });
 

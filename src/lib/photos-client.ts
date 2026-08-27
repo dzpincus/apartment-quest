@@ -45,6 +45,35 @@ export function photoUrl(path: string | null | undefined): string {
 }
 
 /**
+ * Warm the browser cache with every photo of one listing.
+ *
+ * Two callers, one argument between them: the card carousel the moment
+ * somebody starts swiping, and the lightbox the moment it opens. Both are the
+ * same bet — a person who has asked for photo two will ask for photo three
+ * within a second, so the wait should be paid once, up front, rather than
+ * eight times in a row with a grey box between each.
+ *
+ * It deliberately does *not* run on mount. Sixty cards holding eight photos
+ * each is 480 requests for a page nobody has scrolled, which is why
+ * `slidesToRender` exists (`src/lib/carousel.ts`).
+ *
+ * `new Image()` rather than `<link rel="preload">`: no element to clean up, no
+ * "preloaded but not used" console warning when a card scrolls out of view,
+ * and the fetch lands in the same HTTP cache the `<img>` will read from.
+ * Returns the URLs it asked for, which is also what makes it testable — in
+ * Node there is no `Image` and the function is then a pure URL builder.
+ */
+export function prefetchPhotos(
+  photos: ReadonlyArray<{ storage_path: string }> | null | undefined,
+): string[] {
+  const urls = (photos ?? []).map((photo) => photoUrl(photo.storage_path)).filter(Boolean);
+  if (typeof Image === "function") {
+    for (const url of urls) new Image().src = url;
+  }
+  return urls;
+}
+
+/**
  * Copy the photos ticked in the import panel into storage.
  *
  * Progress is a single sonner toast that turns into its own result, because

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import {
@@ -20,6 +21,7 @@ import { PoweredByGoogle } from "@/components/listings/powered-by-google";
 import { PetsMark } from "@/components/listings/pets-mark";
 import { AmenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
+import { PhotoLightbox } from "@/components/listings/photo-lightbox";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useLocations, useUnread, type ListingRow } from "@/lib/queries";
@@ -32,7 +34,8 @@ import {
 import { usePerson } from "@/lib/person";
 import { usePrimaryLocationId } from "@/lib/prefs";
 import { commuteMinutes } from "@/lib/geo-types";
-import { money } from "@/lib/format";
+import { prefetchPhotos } from "@/lib/photos-client";
+import { listingLabel, money } from "@/lib/format";
 import { fmtDay } from "@/lib/time";
 import type { Uuid } from "@/lib/types";
 
@@ -85,6 +88,10 @@ export function ListingsTable({
   const { data: locations } = useLocations();
   // The column exists only while the starred place does — see `prefs.ts`.
   const primaryId = usePrimaryLocationId(person?.id, locations);
+  // Desktop's "click through the photos" is the lightbox, opened from the row
+  // thumb. One dialog for the table, the same as the cards do it.
+  const [lightbox, setLightbox] = useState<{ id: Uuid; index: number } | null>(null);
+  const open = lightbox ? rows.find((row) => row.id === lightbox.id) : undefined;
 
   function toggle(key: SortKey) {
     onSortChange(
@@ -138,6 +145,13 @@ export function ListingsTable({
               incomes={incomes}
               unread={unread.byListing[row.id] ?? 0}
               primaryLocationId={primaryId}
+              onOpenPhotos={() => {
+                // The whole set, warmed before the dialog paints — the arrows
+                // in there are the point, and one round trip per press is not
+                // "clicking through".
+                prefetchPhotos(row.photos);
+                setLightbox({ id: row.id, index: 0 });
+              }}
             />
           ))}
         </TableBody>
@@ -146,6 +160,16 @@ export function ListingsTable({
           shown away from a Google map — and the Transit column is exactly
           that. It appears with the column and disappears with it. */}
       {primaryId && <PoweredByGoogle className="mt-1 text-right" />}
+
+      {open && (
+        <PhotoLightbox
+          photos={open.photos ?? []}
+          index={lightbox?.index ?? null}
+          label={listingLabel(open.address, open.unit)}
+          onIndexChange={(index) => setLightbox((was) => (was ? { ...was, index } : was))}
+          onOpenChange={(next) => !next && setLightbox(null)}
+        />
+      )}
     </>
   );
 }
@@ -155,14 +179,17 @@ function Row({
   incomes,
   unread,
   primaryLocationId,
+  onOpenPhotos,
 }: {
   row: ListingRow;
   incomes: ReadonlyArray<number | null | undefined>;
   unread: number;
   /** Null when nobody starred a place — then there is no column to fill. */
   primaryLocationId: Uuid | null;
+  onOpenPhotos: () => void;
 }) {
   const save = useRowEdit(row);
+  const photos = row.photos?.length ?? 0;
 
   return (
     // 3px left rail in the colour of whoever found it — the desktop version of
@@ -175,8 +202,26 @@ function Row({
       <TableCell className="max-w-72">
         <span className="flex items-center gap-2">
           {/* Small enough to sit inside the row's line height, so adding
-              photos never changes the table's rhythm. */}
-          <ListingThumb photo={row.photos?.[0]} alt="" className="size-10" />
+              photos never changes the table's rhythm. A row with photos makes
+              it a button: 40px is too small to browse in, and the lightbox's
+              arrows are the desktop version of the cards' swipe. With no
+              photos it stays the inert alignment tile it has always been. */}
+          {photos > 0 ? (
+            <button
+              type="button"
+              onClick={onOpenPhotos}
+              aria-label={`Open ${photos} ${photos === 1 ? "photo" : "photos"} of ${row.address}`}
+              className="shrink-0 rounded-2xl focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+            >
+              <ListingThumb
+                photo={row.photos[0]}
+                alt=""
+                className="size-10 transition-opacity hover:opacity-80"
+              />
+            </button>
+          ) : (
+            <ListingThumb photo={undefined} alt="" className="size-10" />
+          )}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <Link
