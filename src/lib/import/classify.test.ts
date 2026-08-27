@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   blockedNote,
   classifyFetched,
+  classifyStructured,
   evidencePhrase,
+  hasLiveSignals,
   hostLabel,
   isBlockedNote,
   landedElsewhere,
+  needsModelConfirmation,
+  primaryContent,
+  structuredStatuses,
   toState,
   transitionSummary,
+  unconfirmedNote,
+  type Classification,
   type FetchedPage,
 } from "./classify";
 
@@ -376,5 +383,283 @@ describe("hostLabel", () => {
     expect(hostLabel("nonsense")).toBe("");
     const out = classifyFetched(page({ finalUrl: "", originalUrl: "", status: 404 }));
     expect(out.note).toBe("page is gone (404)");
+  });
+});
+
+// -- the false positive that caused all of this -------------------------------
+
+/**
+ * A StreetEasy **unit** page (`/building/<slug>/<unit>`), not a listing page.
+ * The live listing is at the top; underneath it a price-history table lists
+ * three older listings of the same apartment, and every one of those rows says
+ * "No longer available" or "Delisted". Both sites embed their page data as a
+ * JSON *string* inside another script, so the status codes arrive escaped —
+ * `\"status\":\"ACTIVE\"` — which is the shape the fixtures below copy.
+ */
+const SE_HISTORY_ROWS = [
+  '<a href="https://streeteasy.com/rental/4523362" data-testid="priceHistoryLink">Delisted by ERNY LLC</a>',
+  '<a href="https://streeteasy.com/rental/4523362" data-testid="priceHistoryLink">No longer available</a>',
+  '<a href="https://streeteasy.com/rental/3094129" data-testid="priceHistoryLink">No longer available</a>',
+].join("");
+
+function seUnitPage(statusJson: string, opts: { live?: boolean } = {}): string {
+  const live = opts.live ?? true;
+  return [
+    "<html><head>",
+    "<title>913 Saint John's Place #1R in Crown Heights, Brooklyn | StreetEasy</title>",
+    '<meta property="og:description" content="Cozy 4 bedroom, 1.5 bathroom just blocks away from Brooklyn Museum."/>',
+    "</head><body>",
+    "<h1>913 Saint John's Place #1R</h1>",
+    live ? "<p>$4,350</p><p>for rent</p><p>4 beds</p><p>Available now</p>" : "<p>4 beds</p>",
+    "<h2>Price history</h2>",
+    SE_HISTORY_ROWS,
+    `<script>self.__next_f.push([1,"${statusJson}"])</script>`,
+    "</body></html>",
+  ].join("");
+}
+
+/** What the saved page actually carries: three dead history rows, one live listing. */
+const SE_STATUS_JSON = [
+  '{\\"date\\":\\"2024-09-04\\",\\"status\\":\\"DELISTED\\",\\"listingId\\":\\"4523362\\"},',
+  '{\\"date\\":\\"2024-09-03\\",\\"status\\":\\"NO_LONGER_AVAILABLE\\",\\"listingId\\":\\"4523362\\"},',
+  '{\\"id\\":\\"5144148\\",\\"pricing\\":{\\"price\\":4350},\\"status\\":\\"ACTIVE\\"}',
+].join("");
+
+describe("the StreetEasy unit page that was called gone", () => {
+  const url = "https://streeteasy.com/building/913-st-johns-place-brooklyn/1r";
+  const unitPage = (html: string): FetchedPage => ({
+    status: 200,
+    finalUrl: url,
+    originalUrl: url,
+    html,
+  });
+
+  it("reads the site's own status before it reads any sentence", () => {
+    const out = classifyFetched(unitPage(seUnitPage(SE_STATUS_JSON)));
+    expect(out.state).toBe("active");
+    expect(out.note).toBe("streeteasy.com: status ACTIVE");
+    expect(out.tier).toBe("structured");
+  });
+
+  it("finds the escaped status codes a real page ships", () => {
+    expect(structuredStatuses("streeteasy.com", seUnitPage(SE_STATUS_JSON))).toEqual([
+      "DELISTED",
+      "NO_LONGER_AVAILABLE",
+      "ACTIVE",
+    ]);
+  });
+
+  it("keeps the price history out of the primary content", () => {
+    const primary = primaryContent(unitPage(seUnitPage(SE_STATUS_JSON)));
+    expect(primary).toContain("913 Saint John's Place #1R");
+    expect(primary).toContain("Cozy 4 bedroom");
+    expect(primary).toContain("$4,350");
+  });
+
+  it("still refuses to call it gone with the status codes stripped out", () => {
+    // Belt and braces: even a site that stops shipping its status must not be
+    // read off its own history table.
+    const out = classifyFetched(unitPage(seUnitPage("")));
+    expect(out.state).not.toBe("off_market");
+  });
+});
+
+describe("classifyStructured — the site's own answer", () => {
+  it("takes any live status as the answer, whatever else is on the page", () => {
+    const out = classifyStructured(
+      "streeteasy.com",
+      '{"status":"DELISTED"} {"status":"AVAILABLE"}',
+    );
+    expect(out).toEqual({
+      state: "active",
+      note: "streeteasy.com: status AVAILABLE",
+      tier: "structured",
+    });
+  });
+
+  it("counts in contract and pending as live — nobody re-lists mid-application", () => {
+    expect(classifyStructured("streeteasy.com", '{"status":"IN_CONTRACT"}')?.state).toBe(
+      "active",
+    );
+    expect(classifyStructured("streeteasy.com", '{"status":"PENDING"}')?.state).toBe(
+      "active",
+    );
+  });
+
+  it("calls it off market only when every status on the page is a dead one", () => {
+    const out = classifyStructured(
+      "streeteasy.com",
+      '{"status":"NO_LONGER_AVAILABLE"} {"status":"DELISTED"}',
+    );
+    expect(out).toEqual({
+      state: "off_market",
+      note: "streeteasy.com: status NO_LONGER_AVAILABLE",
+      tier: "structured",
+    });
+  });
+
+  it("defers when a status belongs to neither list", () => {
+    expect(classifyStructured("streeteasy.com", '{"status":"SOMETHING_NEW"}')).toBeNull();
+    expect(classifyStructured("streeteasy.com", '{"status":"DELISTED"} {"status":"DRAFT"}'))
+      .toBeNull();
+  });
+
+  it("says nothing about a page with no status at all", () => {
+    expect(classifyStructured("streeteasy.com", "<p>hello</p>")).toBeNull();
+  });
+
+  it("says nothing about a host it does not know", () => {
+    expect(classifyStructured("apartments.com", '{"status":"DELISTED"}')).toBeNull();
+  });
+
+  it("reads Zillow's homeStatus, and only Zillow's", () => {
+    expect(classifyStructured("www.zillow.com", '{"homeStatus":"FOR_RENT"}')?.state).toBe(
+      "active",
+    );
+    expect(classifyStructured("zillow.com", '{"homeStatus":"RECENTLY_SOLD"}')?.state).toBe(
+      "off_market",
+    );
+    expect(classifyStructured("zillow.com", '{"homeStatus":"OTHER"}')?.state).toBe(
+      "off_market",
+    );
+    // StreetEasy's key on a Zillow page means nothing, and vice versa.
+    expect(classifyStructured("zillow.com", '{"status":"DELISTED"}')).toBeNull();
+  });
+
+  it("beats the regex tier on a page that says both things", () => {
+    const url = "https://www.zillow.com/homedetails/x/123_zpid/";
+    const out = classifyFetched({
+      status: 200,
+      finalUrl: url,
+      originalUrl: url,
+      html: '<html><body><p>Similar homes recently rented on Jan 3</p><script>{"homeStatus":"FOR_RENT"}</script></body></html>',
+    });
+    expect(out.state).toBe("active");
+    expect(out.tier).toBe("structured");
+  });
+});
+
+describe("the regex tier only reads what the page is about", () => {
+  const url = "https://apartments.example.com/unit/4b";
+  const at = (html: string): FetchedPage => ({
+    status: 200,
+    finalUrl: url,
+    originalUrl: url,
+    html,
+  });
+
+  it("acts on a dead phrase in the primary content", () => {
+    const out = classifyFetched(at("<html><body><p>This listing is no longer available.</p></body></html>"));
+    expect(out.state).toBe("off_market");
+    expect(out.tier).toBe("regex");
+  });
+
+  it("reads the title and the h1, not only the body text", () => {
+    const out = classifyFetched(
+      at("<html><head><title>4B — no longer available</title></head><body><p>hi</p></body></html>"),
+    );
+    expect(out.state).toBe("off_market");
+  });
+
+  it("reads og:description too", () => {
+    const out = classifyFetched(
+      at('<html><head><meta property="og:description" content="This unit has been rented."/></head><body><p>hi</p></body></html>'),
+    );
+    expect(out.state).toBe("off_market");
+  });
+
+  it("will not act on a phrase buried past the primary content", () => {
+    const filler = "<p>Neighborhood facts and figures.</p>".repeat(60);
+    const out = classifyFetched(
+      at(`<html><body><p>$4,200</p><p>2 bd</p>${filler}<p>No longer available</p></body></html>`),
+    );
+    expect(out.state).toBe("ambiguous");
+    expect(out.note).toContain("two stories on one page");
+  });
+
+  it("does not let the price heuristic overrule a phrase it declined to act on", () => {
+    // The old bug's mirror image: "active" is a verdict too, and a page with a
+    // dead sentence somewhere on it has not earned one.
+    const filler = "<p>Neighborhood facts and figures.</p>".repeat(60);
+    const out = classifyFetched(
+      at(`<html><body><p>$4,200</p><p>2 bd</p>${filler}<p>has been rented</p></body></html>`),
+    );
+    expect(out.state).not.toBe("active");
+  });
+
+  it("defers when the primary content is still loudly for rent", () => {
+    const out = classifyFetched(
+      at(
+        "<html><body><h1>4B for rent</h1><p>Apartment for rent in Brooklyn</p>" +
+          "<p>See more homes for rent</p><p>Off market</p></body></html>",
+      ),
+    );
+    expect(out.state).toBe("ambiguous");
+  });
+
+  it("defers when a live price sits beside the word available", () => {
+    const out = classifyFetched(
+      at("<html><body><p>$4,350</p><p>Available now</p><p>2 bd</p><p>Off market</p></body></html>"),
+    );
+    expect(out.state).toBe("ambiguous");
+  });
+});
+
+describe("hasLiveSignals", () => {
+  it("does not let 'no longer available' vouch for itself", () => {
+    expect(hasLiveSignals("$4,200 — this listing is no longer available")).toBe(false);
+  });
+
+  it("counts three 'for rent's as a page still selling one", () => {
+    expect(hasLiveSignals("for rent · homes for rent · apartments for rent")).toBe(true);
+    expect(hasLiveSignals("for rent · homes for rent")).toBe(false);
+  });
+
+  it("wants a price and 'available' close together, not merely both present", () => {
+    expect(hasLiveSignals("$4,350 Available now")).toBe(true);
+    expect(hasLiveSignals(`$4,350 ${"x".repeat(2_000)} Available now`)).toBe(false);
+  });
+});
+
+describe("needsModelConfirmation — which tiers stand on their own", () => {
+  const gone = (tier: Classification["tier"]): Classification => ({
+    state: "off_market",
+    note: "streeteasy.com: no longer available",
+    tier,
+  });
+
+  it("asks the model about a regex-only gone", () => {
+    expect(needsModelConfirmation(gone("regex"))).toBe(true);
+  });
+
+  it("does not second-guess the site's own status code", () => {
+    expect(needsModelConfirmation(gone("structured"))).toBe(false);
+  });
+
+  it("does not second-guess a 404 or a redirect", () => {
+    expect(
+      needsModelConfirmation({ state: "removed", note: "x", tier: "status" }),
+    ).toBe(false);
+    expect(
+      needsModelConfirmation({ state: "removed", note: "x", tier: "redirect" }),
+    ).toBe(false);
+  });
+
+  it("has nothing to confirm about a live page", () => {
+    expect(
+      needsModelConfirmation({ state: "active", note: "x", tier: "signals" }),
+    ).toBe(false);
+  });
+});
+
+describe("unconfirmedNote", () => {
+  it("keeps the phrase and marks it unproven", () => {
+    expect(unconfirmedNote("streeteasy.com: no longer available")).toBe(
+      "unconfirmed: streeteasy.com: no longer available",
+    );
+  });
+
+  it("stays short enough for a table row", () => {
+    expect(unconfirmedNote("x".repeat(500)).length).toBeLessThanOrEqual(140);
   });
 });

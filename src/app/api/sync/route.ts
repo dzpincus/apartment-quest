@@ -39,11 +39,14 @@ import {
   classifyFetched,
   classifyWithModel,
   isBlockedNote,
+  needsModelConfirmation,
   transitionSummary,
+  unconfirmedNote,
 } from "@/lib/import/classify";
 import {
   emptySync,
   errorNote,
+  isManuallyConfirmedNote,
   learnedNothing,
   type SyncChange,
   type SyncOutcome,
@@ -290,17 +293,20 @@ async function inspect(
   }
 
   if (direct.ok) {
-    return decide({
-      status: direct.status,
-      finalUrl: direct.finalUrl,
-      originalUrl: url,
-      html: direct.html,
-    });
+    return decide(
+      {
+        status: direct.status,
+        finalUrl: direct.finalUrl,
+        originalUrl: url,
+        html: direct.html,
+      },
+      row,
+    );
   }
 
   // A 404 is an answer, not a wall.
   if (direct.status === 404 || direct.status === 410) {
-    return decide({ status: direct.status, finalUrl: url, originalUrl: url });
+    return decide({ status: direct.status, finalUrl: url, originalUrl: url }, row);
   }
 
   // The cooldown is about not burning 500 free credits on a nightly crawl. A
@@ -314,13 +320,16 @@ async function inspect(
       return { kind: "error", message: message(error) };
     }
     if (scraped.ok) {
-      return decide({
-        status: 200,
-        finalUrl: scraped.finalUrl,
-        originalUrl: url,
-        html: scraped.html,
-        markdown: scraped.markdown,
-      });
+      return decide(
+        {
+          status: 200,
+          finalUrl: scraped.finalUrl,
+          originalUrl: url,
+          html: scraped.html,
+          markdown: scraped.markdown,
+        },
+        row,
+      );
     }
     return { kind: "blocked", note: blockedNote(scraped.reason) };
   }
@@ -328,30 +337,88 @@ async function inspect(
   return { kind: "blocked", note: blockedNote(direct.reason) };
 }
 
-/** Regex first; the model only for the pages the regexes cannot call. */
-async function decide(page: {
+type Page = {
   status: number;
   finalUrl: string;
   originalUrl: string;
   html?: string;
   markdown?: string;
-}): Promise<Outcome> {
+};
+
+/**
+ * Cheap tiers first; the model for the pages they cannot call — **and** for the
+ * one verdict they are not allowed to reach alone.
+ *
+ * A `off_market` that only the regex tier believes in gets a confirmation call.
+ * That tier reads sentences on somebody else's website, and a StreetEasy unit
+ * page whose price history said "No longer available" three times about three
+ * dead listings walked a live $4,350 apartment into the Vanished section. The
+ * structured tier and a 404 stand on their own; a phrase does not.
+ *
+ * When the model cannot be asked — no key, nothing to send, or the call itself
+ * failed — the answer is `unknown` with the phrase kept in the note
+ * (`unconfirmed: …`). `learnedNothing` then leaves `listing_state` exactly as
+ * it was, which is the whole point: an unconfirmed phrase moves nothing.
+ */
+async function decide(page: Page, row: Candidate): Promise<Outcome> {
   const first = classifyFetched(page);
-  if (first.state !== "ambiguous") {
+
+  if (first.state !== "ambiguous" && !needsModelConfirmation(first)) {
     return { kind: "state", state: first.state, note: first.note };
   }
 
-  const text = page.html
+  const confirming = first.state !== "ambiguous";
+  const text = promptFor(page);
+
+  if (!text.trim()) {
+    // Nothing to send. An unconfirmable "gone" says so; an ambiguous page keeps
+    // the note the classifier already wrote.
+    return {
+      kind: "state",
+      state: "unknown",
+      note: confirming ? unconfirmedNote(first.note) : first.note,
+    };
+  }
+
+  let verdict;
+  try {
+    verdict = await classifyWithModel(text, { url: page.finalUrl || page.originalUrl });
+  } catch (error) {
+    if (!confirming) return { kind: "error", message: message(error) };
+    // A failed confirmation is not a failed check — it is a "gone" we could not
+    // stand behind, and the listing stays where it is.
+    console.error("[sync] confirmation failed", { id: row.id, reason: message(error) });
+    return { kind: "state", state: "unknown", note: unconfirmedNote(first.note) };
+  }
+
+  if (!confirming) return { kind: "state", state: verdict.state, note: verdict.note };
+
+  const agrees = verdict.state === "off_market" || verdict.state === "removed";
+  if (agrees) {
+    // Both tiers, one note: the page's own words beat the model's paraphrase.
+    return { kind: "state", state: verdict.state, note: first.note };
+  }
+
+  // The model read the whole page and did not see a dead listing. On a row a
+  // human has already marked live, say so in the note — that is the case this
+  // gate exists for.
+  const manual = isManuallyConfirmedNote(row.state_note);
+  console.info("[sync] confirmation declined", {
+    id: row.id,
+    regex: first.note,
+    model: verdict.state,
+    manuallyConfirmed: manual,
+  });
+  return verdict.state === "active"
+    ? { kind: "state", state: "active", note: verdict.note }
+    : { kind: "state", state: "unknown", note: unconfirmedNote(first.note) };
+}
+
+/** What the model is asked to read: the reduced page, capped. */
+function promptFor(page: Page): string {
+  return page.html
     ? buildPrompt(reduceHtml(page.html), CLASSIFY_CAP)
     : (page.markdown ?? "").slice(0, CLASSIFY_CAP);
-  if (!text.trim()) return { kind: "state", state: "unknown", note: first.note };
-
-  try {
-    const verdict = await classifyWithModel(text, { url: page.finalUrl || page.originalUrl });
-    return { kind: "state", state: verdict.state, note: verdict.note };
-  } catch (error) {
-    return { kind: "error", message: message(error) };
-  }
 }
 
 /**

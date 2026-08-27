@@ -4,7 +4,11 @@ import {
   emptySync,
   errorNote,
   isBlockedNote,
+  isManuallyConfirmedNote,
+  isUnconfirmedNote,
   learnedNothing,
+  MANUAL_GONE_NOTE,
+  MANUAL_LIVE_NOTE,
   NOTE_CAP,
   type SyncOutcome,
 } from "./sync-types";
@@ -75,5 +79,35 @@ describe("errorNote", () => {
 
   it("fits in the column", () => {
     expect(errorNote("x".repeat(500))).toHaveLength(NOTE_CAP);
+  });
+});
+
+describe("the notes a person writes", () => {
+  it("recognises the one 'Still live' leaves behind", () => {
+    expect(isManuallyConfirmedNote(MANUAL_LIVE_NOTE)).toBe(true);
+    expect(isManuallyConfirmedNote("Manually confirmed on the phone")).toBe(true);
+  });
+
+  it("does not confuse 'Report gone' with it — they are opposite claims", () => {
+    expect(isManuallyConfirmedNote(MANUAL_GONE_NOTE)).toBe(false);
+  });
+
+  it("is not fooled by a robot's note, or by nothing at all", () => {
+    expect(isManuallyConfirmedNote("streeteasy.com: status ACTIVE")).toBe(false);
+    expect(isManuallyConfirmedNote(blockedNote("captcha"))).toBe(false);
+    expect(isManuallyConfirmedNote(null)).toBe(false);
+    expect(isManuallyConfirmedNote(undefined)).toBe(false);
+  });
+});
+
+describe("isUnconfirmedNote", () => {
+  it("recognises a gone nothing could stand behind", () => {
+    expect(isUnconfirmedNote("unconfirmed: streeteasy.com: no longer available")).toBe(true);
+  });
+
+  it("is not a blocked note and not an error note", () => {
+    expect(isUnconfirmedNote(blockedNote("403"))).toBe(false);
+    expect(isUnconfirmedNote(errorNote("ECONNRESET"))).toBe(false);
+    expect(isBlockedNote("unconfirmed: x")).toBe(false);
   });
 });

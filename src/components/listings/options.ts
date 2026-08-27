@@ -8,6 +8,7 @@ import {
   PETS_LABELS,
   STATUS_LABELS,
 } from "@/lib/format";
+import type { LinkStateFilter } from "@/lib/listing-filters";
 import type {
   AcPolicy,
   DishwasherPolicy,
@@ -86,6 +87,26 @@ export const OUTDOOR_FILTER_OPTIONS: SelectOption<OutdoorSpacePolicy | "all">[] 
   { value: "all", label: "Any outdoor" },
   ...OUTDOOR_OPTIONS,
 ];
+
+/**
+ * The link-state filter (0006). Every label says "Link:" out loud, because the
+ * control sits next to "Any status" and the two answer different questions —
+ * where *we* are versus what the *site* says. The chips use `LINK_STATE_CHIPS`
+ * instead: by then the row is one word wide and the prefix is noise.
+ */
+export const LINK_STATE_FILTER_OPTIONS: SelectOption<LinkStateFilter>[] = [
+  { value: "all", label: "Link: any" },
+  { value: "live", label: "Link: live" },
+  { value: "gone", label: "Link: gone" },
+  { value: "unchecked", label: "Link: unchecked" },
+];
+
+export const LINK_STATE_CHIPS: Record<LinkStateFilter, string> = {
+  all: "Link: any",
+  live: "Live",
+  gone: "Gone",
+  unchecked: "Unchecked",
+};
 
 /** `guarantor_ok` is a nullable boolean; the UI treats null as "unknown". */
 export type GuarantorChoice = "yes" | "no" | "unknown";

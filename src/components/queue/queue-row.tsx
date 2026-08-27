@@ -50,7 +50,7 @@ export function QueueRow({
             >
               {listingLabel(row.address, row.unit)}
             </Link>
-            <GoneBadge state={row.listing_state} note={row.state_note} />
+            <GoneBadge state={row.listing_state} note={row.state_note} listing={row} />
           </span>
           <p className="truncate text-xs text-muted-foreground">
             {row.broker?.name ?? "no broker"}

@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { listingLabel } from "@/lib/format";
 import { assertSafeUrl, fetchPage, UnsafeUrlError } from "@/lib/import/fetch-page";
+import { canonicalListingUrl } from "@/lib/import/canonical";
 import { normalizeListingUrl } from "@/lib/url";
 import { firecrawlEnabled, scrapeWithFirecrawl } from "@/lib/import/firecrawl";
 import { buildPrompt, PROMPT_CAP, reduceHtml } from "@/lib/import/reduce";
@@ -96,8 +97,16 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
   let promptText: string;
   let photos: string[] = [];
   let sourceUrl: string | null = null;
+  /**
+   * What goes in `listings.url`. Usually the link that was pasted — but a
+   * StreetEasy *unit* page that names its own live `/rental/<id>` gets stored
+   * as that instead, because the unit page carries the apartment's whole
+   * history and the sync has to re-read it twice a day. See `canonical.ts`.
+   */
+  let storedUrl: string | null = null;
 
   if (url) {
+    storedUrl = url;
     // Validate before anything else touches it, so a private address is a 400
     // rather than a request our server actually makes.
     try {
@@ -141,6 +150,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
     if (html) {
       promptText = buildPrompt(reduceHtml(html));
       photos = discoverPhotos(html, { baseUrl: sourceUrl ?? url });
+      storedUrl = canonicalListingUrl(url, html);
     } else {
       promptText = markdown.slice(0, PROMPT_CAP);
     }
@@ -160,12 +170,13 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
 
   try {
     const { raw, usage } = await extractListing(promptText, { url: sourceUrl });
-    const coerced = coerceExtract(raw, { url: url || null });
+    const coerced = coerceExtract(raw, { url: storedUrl });
 
     console.info("[import] done", {
       source,
       host: url ? hostOf(url) : null,
       ms: Date.now() - started,
+      canonicalized: Boolean(storedUrl && url && storedUrl !== url),
       filled: coerced.filledKeys.length,
       photos: photos.length,
       confidence: coerced.confidence,

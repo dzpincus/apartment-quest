@@ -1,5 +1,6 @@
 /** Pure filter + sort for the listings table. No React. */
 
+import { isVanished } from "@/lib/queue";
 import { matchesMyVote, voteScore, type MyVoteFilter } from "@/lib/votes";
 import type { ListingRow } from "@/lib/queries";
 import type {
@@ -7,11 +8,34 @@ import type {
   DishwasherPolicy,
   FeeType,
   LaundryPolicy,
+  ListingState,
   ListingStatus,
   OutdoorSpacePolicy,
   PetsPolicy,
   Uuid,
 } from "@/lib/types";
+
+/**
+ * The *other* status. `status` is where we are with a listing (saved,
+ * contacted, applied) and is ours to set; `listing_state` is what the source
+ * page says (0006) and is the sync's to set. Both were filterable only in the
+ * first sense, which made "show me the ones that vanished" a thing you could
+ * see on Home and nowhere else.
+ *
+ * `unchecked` covers a null column as well as `unknown`: a pre-0006 row and a
+ * row nobody has looked at are the same absence.
+ */
+export type LinkStateFilter = "all" | "live" | "gone" | "unchecked";
+
+export function matchesLinkState(
+  state: ListingState | null | undefined,
+  filter: LinkStateFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "gone") return isVanished({ listing_state: state ?? null });
+  if (filter === "live") return state === "active";
+  return state == null || state === "unknown";
+}
 
 export type Filters = {
   rentMin: string;
@@ -19,6 +43,8 @@ export type Filters = {
   bedsMin: string;
   neighborhood: string;
   status: ListingStatus | "all";
+  /** What the *site* says, not what we decided. See `matchesLinkState`. */
+  linkState: LinkStateFilter;
   feeType: FeeType | "all";
   /** A null column reads as `unknown`, same as the select does. */
   pets: PetsPolicy | "all";
@@ -37,6 +63,7 @@ export const EMPTY_FILTERS: Filters = {
   bedsMin: "",
   neighborhood: "all",
   status: "all",
+  linkState: "all",
   feeType: "all",
   pets: "all",
   laundry: "all",
@@ -51,8 +78,8 @@ export const EMPTY_FILTERS: Filters = {
  *
  * "Active" is defined once, here, as "not what `EMPTY_FILTERS` says": the
  * count on the mobile Filters button, the chips under it and
- * `hasActiveFilters` all read this list, so a thirteenth filter cannot land
- * with a button that keeps saying (12).
+ * `hasActiveFilters` all read this list, so a fourteenth filter cannot land
+ * with a button that keeps saying (13).
  */
 export const FILTER_KEYS: ReadonlyArray<keyof Filters> = [
   "rentMin",
@@ -60,6 +87,7 @@ export const FILTER_KEYS: ReadonlyArray<keyof Filters> = [
   "bedsMin",
   "neighborhood",
   "status",
+  "linkState",
   "feeType",
   "pets",
   "laundry",
@@ -222,6 +250,7 @@ export function applyFilters(
     if (bedsMin != null && (r.beds ?? 0) < bedsMin) return false;
     if (f.neighborhood !== "all" && (r.neighborhood ?? "") !== f.neighborhood) return false;
     if (f.status !== "all" && r.status !== f.status) return false;
+    if (!matchesLinkState(r.listing_state, f.linkState)) return false;
     if (f.feeType !== "all" && (r.fee_type ?? "unknown") !== f.feeType) return false;
     if (f.pets !== "all" && (r.pets ?? "unknown") !== f.pets) return false;
     if (f.laundry !== "all" && (r.laundry ?? "unknown") !== f.laundry) return false;

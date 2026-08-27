@@ -8,6 +8,7 @@ import {
   EMPTY_FILTERS,
   FILTER_KEYS,
   hasActiveFilters,
+  matchesLinkState,
   neighborhoods,
   sortRows,
   transitSeconds,
@@ -82,6 +83,8 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
       { bedsMin: "2" },
       { neighborhood: "Bushwick" },
       { status: "contacted" },
+      { linkState: "gone" },
+      { linkState: "unchecked" },
       { feeType: "no_fee" },
       { pets: "yes" },
       { pets: "unknown" },
@@ -104,6 +107,7 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
         filters({
           neighborhood: "all",
           status: "all",
+          linkState: "all",
           feeType: "all",
           pets: "all",
           laundry: "all",
@@ -133,6 +137,7 @@ describe("activeFilterCount / clearFilter", () => {
           bedsMin: "2",
           neighborhood: "Bushwick",
           status: "contacted",
+          linkState: "live",
           feeType: "no_fee",
           pets: "yes",
           laundry: "in_unit",
@@ -809,5 +814,81 @@ describe("sortRows — transitToPrimary", () => {
 
   it("sorts shortest-first on the first click", () => {
     expect(defaultSortDir("transitToPrimary")).toBe("asc");
+  });
+});
+
+describe("matchesLinkState — what the SITE says, not what we decided", () => {
+  it("lets everything past on the default", () => {
+    for (const state of ["active", "off_market", "removed", "unknown", null] as const) {
+      expect(matchesLinkState(state, "all")).toBe(true);
+    }
+  });
+
+  it("counts both flavours of gone as gone", () => {
+    expect(matchesLinkState("off_market", "gone")).toBe(true);
+    expect(matchesLinkState("removed", "gone")).toBe(true);
+    expect(matchesLinkState("active", "gone")).toBe(false);
+    expect(matchesLinkState("unknown", "gone")).toBe(false);
+    expect(matchesLinkState(null, "gone")).toBe(false);
+  });
+
+  it("counts only 'active' as live — unknown is an absence, not a yes", () => {
+    expect(matchesLinkState("active", "live")).toBe(true);
+    expect(matchesLinkState("unknown", "live")).toBe(false);
+    expect(matchesLinkState(null, "live")).toBe(false);
+  });
+
+  it("treats a null column and 'unknown' as the same unchecked row", () => {
+    expect(matchesLinkState(null, "unchecked")).toBe(true);
+    expect(matchesLinkState(undefined, "unchecked")).toBe(true);
+    expect(matchesLinkState("unknown", "unchecked")).toBe(true);
+    expect(matchesLinkState("active", "unchecked")).toBe(false);
+    expect(matchesLinkState("off_market", "unchecked")).toBe(false);
+  });
+});
+
+describe("applyFilters — link state", () => {
+  const rows = [
+    row({ id: "live", listing_state: "active" }),
+    row({ id: "gone", listing_state: "off_market" }),
+    row({ id: "404", listing_state: "removed" }),
+    row({ id: "shrug", listing_state: "unknown" }),
+    row({ id: "never", listing_state: null }),
+  ];
+
+  it("keeps everything by default", () => {
+    expect(ids(applyFilters(rows, EMPTY_FILTERS))).toEqual([
+      "live",
+      "gone",
+      "404",
+      "shrug",
+      "never",
+    ]);
+  });
+
+  it("narrows to the ones that vanished", () => {
+    expect(ids(applyFilters(rows, filters({ linkState: "gone" })))).toEqual(["gone", "404"]);
+  });
+
+  it("narrows to the ones still up", () => {
+    expect(ids(applyFilters(rows, filters({ linkState: "live" })))).toEqual(["live"]);
+  });
+
+  it("narrows to the ones nobody has looked at", () => {
+    expect(ids(applyFilters(rows, filters({ linkState: "unchecked" })))).toEqual([
+      "shrug",
+      "never",
+    ]);
+  });
+
+  it("stacks with the status filter — the two are different questions", () => {
+    const mixed = [
+      row({ id: "a", status: "contacted", listing_state: "off_market" }),
+      row({ id: "b", status: "contacted", listing_state: "active" }),
+      row({ id: "c", status: "saved", listing_state: "off_market" }),
+    ];
+    expect(
+      ids(applyFilters(mixed, filters({ status: "contacted", linkState: "gone" }))),
+    ).toEqual(["a"]);
   });
 });

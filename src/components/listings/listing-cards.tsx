@@ -85,7 +85,6 @@ export function ListingCards({
                 <span className="flex items-center gap-1.5 text-[17px] font-black">
                   <span className="truncate">{listingLabel(row.address, row.unit)}</span>
                   <UnreadBadge count={unread.byListing[row.id] ?? 0} />
-                  <GoneBadge state={row.listing_state} note={row.state_note} />
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
                   {[row.neighborhood, bedsBaths(row.beds, row.baths), row.trains]
@@ -108,6 +107,10 @@ export function ListingCards({
                 incomeMultiplier={row.income_multiplier}
                 incomes={incomes}
               />
+              {/* Out of the <Link> above and down here on purpose: the badge is
+                  a popover trigger now, and a button inside an anchor is both
+                  invalid markup and a tap that navigates instead of opening. */}
+              <GoneBadge state={row.listing_state} note={row.state_note} listing={row} />
             </div>
 
             {/* Wraps rather than overflows: four vote circles plus a long

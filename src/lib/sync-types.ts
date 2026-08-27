@@ -111,8 +111,38 @@ export function blockedNote(reason: string): string {
 }
 
 export function isBlockedNote(note: string | null | undefined): boolean {
+  return startsWith(note, BLOCKED_PREFIX);
+}
+
+/**
+ * The two notes a *person* writes, and the predicate that reads the first one
+ * back. "Still live" is a correction to a robot, and the robot has to respect
+ * it: `/api/sync` will not put a manually confirmed listing back in the
+ * Vanished section on the strength of a regex match alone (see `classify.ts` →
+ * `needsModelConfirmation`). The model may still overrule a human — it read
+ * the page, and apartments do go.
+ */
+export const MANUAL_LIVE_NOTE = "manually confirmed";
+export const MANUAL_GONE_NOTE = "manually reported";
+
+export function isManuallyConfirmedNote(note: string | null | undefined): boolean {
+  return startsWith(note, MANUAL_LIVE_NOTE);
+}
+
+/**
+ * A "gone" that only the regex tier believed and nothing could confirm. The
+ * state written beside it is `unknown` — never `off_market` — so an unlucky
+ * phrase in a price history cannot move a listing on its own.
+ */
+export const UNCONFIRMED_PREFIX = "unconfirmed:";
+
+export function isUnconfirmedNote(note: string | null | undefined): boolean {
+  return startsWith(note, UNCONFIRMED_PREFIX);
+}
+
+function startsWith(note: string | null | undefined, prefix: string): boolean {
   return (
     typeof note === "string" &&
-    note.trimStart().toLowerCase().startsWith(BLOCKED_PREFIX)
+    note.trimStart().toLowerCase().startsWith(prefix.toLowerCase())
   );
 }

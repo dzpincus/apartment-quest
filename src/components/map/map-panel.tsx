@@ -227,7 +227,7 @@ function MiniCard({ listing, onClose }: { listing: ListingRow; onClose: () => vo
         <span className="min-w-0">
           <span className="flex items-center gap-1.5 text-[15px] font-black">
             <span className="truncate">{listingLabel(listing.address, listing.unit)}</span>
-            <GoneBadge state={listing.listing_state} note={listing.state_note} />
+            <GoneBadge state={listing.listing_state} note={listing.state_note} listing={listing} />
           </span>
           <span className="block truncate text-xs text-muted-foreground">
             {[listing.neighborhood, bedsBaths(listing.beds, listing.baths)]

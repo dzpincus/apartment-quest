@@ -25,6 +25,8 @@ import {
   DISHWASHER_FILTER_OPTIONS,
   FEE_FILTER_OPTIONS,
   LAUNDRY_FILTER_OPTIONS,
+  LINK_STATE_CHIPS,
+  LINK_STATE_FILTER_OPTIONS,
   OUTDOOR_FILTER_OPTIONS,
   PETS_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
@@ -125,6 +127,12 @@ type SelectField = {
   label: string;
   options: ReadonlyArray<SelectOption<string>>;
   inlineClassName: string;
+  /**
+   * What the *chip* says, when the option's own label is too long for one.
+   * "Link: gone" is the right thing to read in a list of controls next to
+   * "Any status"; on a 7px-tall pill under the filter row it is just "Gone".
+   */
+  chips?: Record<string, string>;
 };
 
 function selectFields(neighborhoodOptions: string[]): SelectField[] {
@@ -143,6 +151,13 @@ function selectFields(neighborhoodOptions: string[]): SelectField[] {
       label: "Status",
       options: STATUS_FILTER_OPTIONS,
       inlineClassName: "w-36",
+    },
+    {
+      key: "linkState",
+      label: "Link",
+      options: LINK_STATE_FILTER_OPTIONS,
+      inlineClassName: "w-36",
+      chips: LINK_STATE_CHIPS,
     },
     { key: "feeType", label: "Fee", options: FEE_FILTER_OPTIONS, inlineClassName: "w-28" },
     { key: "pets", label: "Pets", options: PETS_FILTER_OPTIONS, inlineClassName: "w-32" },
@@ -209,7 +224,10 @@ function activeChips(
   for (const field of fields) {
     const value = filters[field.key];
     if (value === EMPTY_FILTERS[field.key]) continue;
-    const label = field.options.find((o) => o.value === value)?.label ?? String(value);
+    const label =
+      field.chips?.[value] ??
+      field.options.find((o) => o.value === value)?.label ??
+      String(value);
     chips.push({ key: field.key, label });
   }
   return chips;
@@ -408,6 +426,10 @@ function FiltersSheet({
           <SheetDescription>
             Applied as you pick them. {active === 0 ? "None set." : `${active} set.`}
           </SheetDescription>
+          {/* Two words that stop the two "status" controls reading as one. */}
+          <p className="text-xs text-muted-foreground">
+            Status = where WE are; Link = what the SITE says.
+          </p>
         </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">

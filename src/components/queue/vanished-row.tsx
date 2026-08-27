@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { usePerson } from "@/lib/person";
 import { useMutations } from "@/lib/mutations";
 import { LINK_STATE_LABELS, listingLabel } from "@/lib/format";
+import { MANUAL_LIVE_NOTE } from "@/lib/sync-types";
 import { timeAgo } from "@/lib/time";
 import type { ListingRow } from "@/lib/queries";
 
@@ -102,7 +103,7 @@ export function VanishedRow({
             setListingState.mutate({
               listing: { id: row.id },
               state: "active",
-              note: "manually confirmed",
+              note: MANUAL_LIVE_NOTE,
             })
           }
         >

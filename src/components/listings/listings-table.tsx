@@ -186,7 +186,7 @@ function Row({
                 {row.address}
               </Link>
               <UnreadBadge count={unread} />
-              <GoneBadge state={row.listing_state} note={row.state_note} />
+              <GoneBadge state={row.listing_state} note={row.state_note} listing={row} />
             </span>
             <InlineEdit
               label="unit"

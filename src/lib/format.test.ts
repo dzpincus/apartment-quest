@@ -18,6 +18,7 @@ import {
   PETS_LABELS,
   PETS_MARKS,
   STATUS_LABELS,
+  STATUS_TONE,
 } from "./format";
 import type {
   AcPolicy,
@@ -280,5 +281,31 @@ describe("rentShort", () => {
 
   it("groups the thousands once a rent is silly money", () => {
     expect(rentShort(1_234_500)).toBe("$1,234.5k");
+  });
+});
+
+describe("STATUS_TONE", () => {
+  const statuses = Object.keys(STATUS_LABELS) as ListingStatus[];
+
+  it("tints every status the picker offers — a missing one renders untinted", () => {
+    for (const status of statuses) {
+      expect(STATUS_TONE[status]).toBeTruthy();
+    }
+    expect(Object.keys(STATUS_TONE).sort()).toEqual([...statuses].sort());
+  });
+
+  it("strikes through the two that mean stop, and only those two", () => {
+    for (const status of statuses) {
+      expect(STATUS_TONE[status].includes("line-through")).toBe(
+        status === "passed" || status === "lost",
+      );
+    }
+  });
+
+  it("borrows nothing from a person: no literal hex anywhere", () => {
+    // Person colour is data (`people.color`); everything here is a token.
+    for (const tone of Object.values(STATUS_TONE)) {
+      expect(tone).not.toMatch(/#[0-9a-f]{3,8}/i);
+    }
   });
 });

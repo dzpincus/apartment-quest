@@ -308,13 +308,62 @@ eat Firecrawl's 500 free credits in under a week. A **manual** `?listing=`
 check is exempt from the cooldown — one credit, asked for on purpose, by
 somebody watching the button.
 
-**Classification is regex first, Haiku second** (`src/lib/import/classify.ts`;
-the pure half is tested). 404/410 or a redirect to `/for-rent` → `removed`; "no
-longer available" / "has been rented" / "rented on" → `off_market`; a price
-*and* a bedroom count with no contrary sentence → `active`. Only a page that
-says none of those costs a model call (`classify_listing`, forced tool, ≤8k
-chars of reduced text). Anything unproven is `unknown`, and `unknown` writes no
-activity row, shows no badge and moves nothing.
+**Classification is three tiers, cheapest first** (`src/lib/import/classify.ts`;
+the pure half is tested). 404/410 or a redirect to `/for-rent` → `removed`.
+Then the **site's own status code**, then the words, then Haiku
+(`classify_listing`, forced tool, ≤8k chars of reduced text). Anything unproven
+is `unknown`, and `unknown` writes no activity row, shows no badge and moves
+nothing.
+
+**A live apartment spent a day in Vanished, and tiers 1 and 2 are the fix.**
+The listing was a StreetEasy *unit* page,
+`/building/913-st-johns-place-brooklyn/1r`, and it was called `off_market` on
+the strength of "No longer available" — three occurrences, every one of them a
+row in the **price-history table** describing a 2024 listing of the same
+apartment (`data-testid="priceHistoryLink"`, `"status":"NO_LONGER_AVAILABLE"`).
+The current listing was `"status":"ACTIVE"`, $4,350, "for rent", at the top of
+the page. Four changes came out of it:
+
+1. **Structured first.** `classifyStructured` reads the site's own machine
+   status: `"status":"…"` on StreetEasy, `"homeStatus":"…"` on Zillow. **Any**
+   live code (`AVAILABLE` / `ACTIVE` / `IN_CONTRACT` / `PENDING`, `FOR_RENT`)
+   is `active` — a unit page carries three dead listings and one live one, and
+   the live one is the only one anybody can rent. `off_market` needs unanimity:
+   *every* code on the page a dead one, with a code from neither list enough to
+   make us defer. Both sites embed their data as a JSON *string* inside another
+   script, so the regex matches `\"status\":\"ACTIVE\"` as well as the
+   unescaped form — matching only the latter finds nothing at all.
+2. **The regex tier only reads the primary content**: `<title>`, every `<h1>`,
+   `og:description`, and the first 1,500 characters of visible text
+   (`primaryContent`). A banner is at the top of a page; a history table is
+   not. There is a second guard, `hasLiveSignals`: three or more "for rent"s,
+   or a price within 800 characters of "available", and the tier defers rather
+   than calling it gone — with the dead phrases scrubbed out first, so "no
+   longer available" cannot vouch for itself with its own last word. A dead
+   phrase we decline to act on also blocks the price-and-beds `active`: a page
+   with two stories on it is `ambiguous`, which is what the model is for.
+3. **The prompt says so too** — price history and "previous listings" sections
+   describe OLDER listings of the same unit; only the *current* listing counts.
+4. **A regex-only `off_market` is not enough to move a listing.**
+   `needsModelConfirmation` is true for exactly that case (a 404, a redirect
+   and a structured code stand on their own), and `/api/sync` then calls Haiku
+   as a **confirmation**. Agreement writes the transition with the page's own
+   words as the note. Disagreement writes the model's verdict. And when the
+   model cannot be asked at all — no key, nothing to send, the call threw — the
+   row gets `unknown` and a note of `unconfirmed: <phrase>`, which
+   `learnedNothing` then refuses to write over the state. Unconfirmed phrases
+   move nothing. This is also what makes **Still live** stick: the note it
+   writes starts with `manually confirmed`, and the next regex-only "gone"
+   needs the model's agreement before it can flip that row back.
+
+**A unit page is not a listing page.** `src/lib/import/canonical.ts` (pure,
+tested) rewrites a StreetEasy `/building/<slug>/<unit>` URL to the
+`/rental/<id>` the page names as live — from `<link rel="canonical">`, or from
+the one `/rental/<id>` on the page with a live status beside it and a dead
+status beside none of its mentions. `/api/import` stores that; **existing rows
+are never rewritten**. On the page above it correctly rewrites *nothing*: all
+five rental links are history rows sitting between an `ACTIVE` and a
+`DELISTED`, and the live listing has no `/rental/` link on the page at all.
 
 **A block is not a state, and neither is a shrug.** `learnedNothing`
 (`src/lib/sync-types.ts`, pure and tested) is the single decision: a block, an
@@ -356,11 +405,36 @@ query's own join instead, which is why the bot still renders there.
 **On screen**: Home gains a fourth section, **Vanished?**, under Gone quiet —
 `listing_state in (off_market, removed)`, with the evidence, when it was last
 checked, and two buttons: **Mark lost** (the ordinary `setListingStatus`) and
-**Still live** (`listing_state = 'active'`, note "manually confirmed", no
+**Still live** (`listing_state = 'active'`, note `manually confirmed`, no
 activity row — correcting a robot is not an impression). It is not in the nav
-badge: news, not a deadline. The table and the cards show a `gone?` badge with
-the evidence as its `title`, and the detail page grows a "Link status" row —
-chip, "checked 3h ago", **Check now** — but only when the listing has a URL.
+badge: news, not a deadline.
+
+**The claim and the reply are now in the same place.** They were not: the badge
+stated "gone?" in four places and took an answer in one, which is the whole of
+"I see the gone labels but no other way to indicate status and no way to
+confirm, label, or filter by listing status". `LinkActions`
+(`src/components/listings/link-actions.tsx`) is the one component and the three
+buttons — **Check now** always, **Still live** + **Mark lost** when the state is
+`off_market` / `removed`, and a quiet **Report gone** (note `manually
+reported`) when it is `active`. It renders on the detail page's "Link status"
+row (chip, evidence, "checked 3h ago"), and inside the `gone?` badge's popover
+in the table, the cards, the queue rows and the map's mini card. The badge is
+read-only when it is given no `listing`. On the cards it moved *out* of the
+`<Link>` wrapping the row: a popover trigger inside an anchor is invalid markup
+and a tap that navigates instead of opening.
+
+**Two statuses, said out loud.** `status` is where WE are (saved → contacted →
+applied, ours, `StatusSelect`) and `listing_state` is what the SITE says (0006,
+the sync's). The filters sheet says exactly that under its title, the
+link-state filter's options all read "Link: …" so they cannot be mistaken for
+the other control, and its chips shorten to "Gone" / "Live" / "Unchecked".
+`linkState` (`matchesLinkState`, tested) is the fourteenth filter:
+`live` is `active` only, `gone` is `isVanished`, `unchecked` is `unknown` *and*
+a null column — a pre-0006 row and a row nobody has looked at are the same
+absence. `StatusSelect`'s trigger is tinted from `STATUS_TONE` (`format.ts`,
+semantic tokens only — grey, `--quiet`, `--due`, lavender, `--yes`, and a faint
+strike-through for passed/lost), because seven identical grey dropdowns down a
+table is not a column anybody can read.
 
 **Forcing a run** (dev server on :3000, or swap in the deployment host):
 

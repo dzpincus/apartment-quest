@@ -1,5 +1,7 @@
 /** Display formatting helpers. Dates live in `time.ts`. */
 
+import type { ListingStatus } from "@/lib/types";
+
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -74,6 +76,27 @@ export const LINK_STATE_LABELS = {
   removed: "Page gone",
   unknown: "Not checked",
 } as const;
+
+/**
+ * The tint on the status control, so "where are we with this one" is legible
+ * without reading seven words in a dropdown.
+ *
+ * Everything here is a semantic token, never a person's colour: `--quiet` for
+ * contacted, `--due` for a tour on the calendar, `--yes` for an application in.
+ * Toured is the lavender of `--muted-foreground` — a real step, but not one
+ * that needs a colour of its own. Passed and lost are struck through and faint:
+ * they are the only two that mean "stop looking at this row", and the strike is
+ * what says so at the size a table cell renders.
+ */
+export const STATUS_TONE: Record<ListingStatus, string> = {
+  saved: "border-border bg-inset text-muted-foreground",
+  contacted: "border-quiet/50 bg-quiet/15 text-quiet",
+  tour_scheduled: "border-due/50 bg-due/15 text-due",
+  toured: "border-muted-foreground/50 bg-muted-foreground/15 text-muted-foreground",
+  applied: "border-yes/50 bg-yes/15 text-yes",
+  passed: "border-border bg-transparent text-faint line-through",
+  lost: "border-border bg-transparent text-faint line-through",
+};
 
 /** Long form, for selects and the detail page. */
 export const PETS_LABELS = {
