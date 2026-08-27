@@ -133,6 +133,16 @@ and the last one always works:
 1. `fetch-page.ts` — direct fetch, Chrome UA, 8s, 2MB cap, ≤3 redirects.
 2. `firecrawl.ts` — only if `FIRECRAWL_API_KEY` is set *and* rung 1 came back
    blocked. Free tier is 500 credits, so it is never the first attempt.
+   **Two timeouts, not one**: Firecrawl's own `timeout: 35000` (plus
+   `waitFor: 1500` for the bot wall's JavaScript) sits inside our 40s socket
+   timeout, because a StreetEasy page behind PerimeterX regularly takes 20-30s
+   to solve and render, and the old 15s client timeout was reporting "The
+   scraping service didn't answer in time." for scrapes that were still
+   working. A timeout or a 5xx is retried **once, after 2s** — but only for
+   `/api/sync`: `/api/import` passes `{ retry: false }`, since a person is
+   waiting inside a 60s function and the rung below (the paste box) always
+   works. A 4xx and a `success: false` body are answers, and are never retried.
+   A successful scrape logs `[firecrawl] took Nms`.
 3. Paste. The response is `{ blocked: true, reason }` — a **200**, not a 500 —
    and the panel swaps in a textarea. `{ text }` skips straight to extraction.
 
@@ -385,11 +395,19 @@ listing sorted to the front of every run forever and starved the other 59.
 
 **The run has a wall clock, not just a count.** `maxDuration` is 300s and Vercel
 kills the function at it, mid-write and with no response, so the pool stops
-handing out work at 240s; whatever it did not reach is counted in
+handing out work early; whatever it did not reach is counted in
 `skipped_deadline` and, with `state_checked_at` untouched, sorts first next run.
 `cron.sql.example` sets `timeout_milliseconds` to 300000 to match — that is how
 long pg_net waits for the answer and **not** a cancellation of the Vercel
 invocation.
+
+`RUN_BUDGET_MS` is **derived, not typed in**: the deadline is checked *before* a
+check starts and never during one, so the budget has to leave a whole worst-case
+check behind it plus room for the writes — `300s − (8s fetch + 82s Firecrawl +
+20s Haiku) − 10s`, i.e. 180s today. It used to be a literal 240s, which was true
+at a 15s Firecrawl timeout and became a killed function the moment rung two grew
+a 40s timeout and a retry. Change any of those three timeouts and the budget
+moves with them.
 
 **Quest Bot** (`people.key = 'bot'`, 0006) exists because `activity.person_id`
 is NOT NULL. It signs the `listing_state_changed` rows ("noticed 214 Grand St

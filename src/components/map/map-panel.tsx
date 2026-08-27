@@ -218,15 +218,19 @@ function MiniCard({ listing, onClose }: { listing: ListingRow; onClose: () => vo
   const color = listing.added_by_person?.color ?? "#888";
   return (
     <div
-      className="absolute inset-x-2 bottom-2 z-20 grid gap-2 rounded-[20px] border-2 bg-card p-3 shadow-[0_6px_0_rgba(0,0,0,0.35)] md:inset-x-auto md:right-3 md:bottom-3 md:w-80"
+      className="absolute inset-x-2 bottom-2 z-20 grid min-w-0 gap-2 overflow-hidden rounded-[20px] border-2 bg-card p-3 shadow-[0_6px_0_rgba(0,0,0,0.35)] md:inset-x-auto md:right-3 md:bottom-3 md:w-80"
       style={{ borderColor: color }}
       role="dialog"
       aria-label={listingLabel(listing.address, listing.unit)}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="min-w-0">
-          <span className="flex items-center gap-1.5 text-[15px] font-black">
-            <span className="truncate">{listingLabel(listing.address, listing.unit)}</span>
+      {/* Same rule as the listing cards: the address wraps, the rent never
+          shrinks. This card is only 8px narrower than the phone. */}
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-start gap-1.5 text-[15px] font-black">
+            <span className="min-w-0 line-clamp-2 break-words">
+              {listingLabel(listing.address, listing.unit)}
+            </span>
             <GoneBadge state={listing.listing_state} note={listing.state_note} listing={listing} />
           </span>
           <span className="block truncate text-xs text-muted-foreground">
@@ -235,16 +239,19 @@ function MiniCard({ listing, onClose }: { listing: ListingRow; onClose: () => vo
               .join(" · ") || "No details yet"}
           </span>
         </span>
-        <span className="text-[17px] font-black tabular-nums" style={{ color }}>
+        <span
+          className="shrink-0 text-[17px] font-black whitespace-nowrap tabular-nums"
+          style={{ color }}
+        >
           {money(listing.rent) || "—"}
         </span>
       </div>
 
       <AmenityMarks listing={listing} className="text-xs" />
 
-      <div className="flex items-center justify-between gap-2">
-        <VoteChips votes={listing.votes} />
-        <PersonDot person={listing.added_by_person} />
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <VoteChips votes={listing.votes} className="shrink-0" />
+        <PersonDot person={listing.added_by_person} className="shrink-0" />
       </div>
 
       <div className="flex items-center gap-2">

@@ -72,9 +72,14 @@ export function ListingCards({
             className="grid min-w-0 gap-2.5 overflow-hidden rounded-[20px] border-2 bg-card p-3.5 shadow-[0_6px_0_rgba(0,0,0,0.25)]"
             style={{ borderColor: color }}
           >
+            {/* The address is the one thing that may wrap: "913 Saint John's
+                Place #1R" is wider than the space left on a 412px phone once
+                the thumbnail and the rent are paid for, and half an address is
+                worse than two lines of one. Everything to its right is
+                `shrink-0` so the rent can never be shaved to "$4,35". */}
             <Link
               href={`/listings/${row.id}`}
-              className="flex items-start justify-between gap-2"
+              className="flex min-w-0 items-start gap-3"
             >
               <ListingThumb
                 photo={row.photos?.[0]}
@@ -82,9 +87,14 @@ export function ListingCards({
                 className="size-16 self-center"
               />
               <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-[17px] font-black">
-                  <span className="truncate">{listingLabel(row.address, row.unit)}</span>
-                  <UnreadBadge count={unread.byListing[row.id] ?? 0} />
+                <span className="flex min-w-0 items-start gap-1.5 text-[17px] font-black">
+                  <span className="min-w-0 line-clamp-2 break-words">
+                    {listingLabel(row.address, row.unit)}
+                  </span>
+                  <UnreadBadge
+                    count={unread.byListing[row.id] ?? 0}
+                    className="mt-0.5 shrink-0"
+                  />
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
                   {[row.neighborhood, bedsBaths(row.beds, row.baths), row.trains]
@@ -93,10 +103,13 @@ export function ListingCards({
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-1 text-right">
-                <span className="text-[18px] font-black tabular-nums" style={{ color }}>
+                <span
+                  className="shrink-0 text-[18px] font-black whitespace-nowrap tabular-nums"
+                  style={{ color }}
+                >
                   {money(row.rent) || "—"}
                 </span>
-                <ChevronRight className="size-4 text-faint" />
+                <ChevronRight className="size-4 shrink-0 text-faint" />
               </span>
             </Link>
 
@@ -116,12 +129,12 @@ export function ListingCards({
             {/* Wraps rather than overflows: four vote circles plus a long
                 name is wider than a 412px phone once the padding is paid, and
                 the name is the half that must stay readable. */}
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
               <VoteChips votes={row.votes} className="shrink-0" />
               <PersonDot
                 person={row.added_by_person}
                 withName
-                className="min-w-0 text-xs font-extrabold text-muted-foreground [&>span:last-of-type]:truncate"
+                className="shrink-0 text-xs font-extrabold text-muted-foreground"
               />
             </div>
 

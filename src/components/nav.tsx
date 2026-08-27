@@ -127,8 +127,13 @@ export function Nav() {
       </header>
 
       {/* Mobile: the page owns its own big title (see the design), so this row
-          carries only who you are and the way out. */}
-      <header className="sticky top-0 z-40 flex h-12 items-center justify-end gap-1 px-4 md:hidden">
+          carries only who you are and the way out.
+
+          Opaque on purpose. It is sticky, and a transparent bar meant the
+          cards scrolled *through* the person pill. The colour is the top stop
+          of the page gradient (`globals.css`), so at rest the bar is
+          invisible and only shows itself once there is something behind it. */}
+      <header className="sticky top-0 z-40 flex h-12 items-center justify-end gap-1 border-b border-border/50 bg-[#23204a]/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-[#23204a]/80 md:hidden">
         <PersonPill />
         <LogoutButton />
       </header>

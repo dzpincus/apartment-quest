@@ -36,17 +36,19 @@ export function QueueRow({
 
   return (
     <div
-      className="flex flex-col gap-3 rounded-[20px] border-2 bg-card p-4"
+      className="flex min-w-0 flex-col gap-3 overflow-hidden rounded-[20px] border-2 bg-card p-4"
       style={{ borderColor: tone }}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">
           {/* A listing can be overdue *and* gone — the due date wins the bucket
-              (queue.ts), so the badge is what stops that from hiding the news. */}
-          <span className="flex min-w-0 items-center gap-1.5">
+              (queue.ts), so the badge is what stops that from hiding the news.
+              The address wraps rather than truncates: on a phone the unit
+              number is the last thing on the line and the first thing cut. */}
+          <span className="flex min-w-0 items-start gap-1.5">
             <Link
               href={`/listings/${row.id}`}
-              className="min-w-0 truncate text-[17px] font-black underline-offset-4 hover:underline"
+              className="min-w-0 line-clamp-2 break-words text-[17px] font-black underline-offset-4 hover:underline"
             >
               {listingLabel(row.address, row.unit)}
             </Link>
@@ -59,8 +61,8 @@ export function QueueRow({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 rounded-[14px] bg-inset px-3 py-2.5 text-sm">
-        <span className={cn("min-w-0 truncate", !row.next_action && "text-muted-foreground")}>
+      <div className="flex min-w-0 items-center justify-between gap-3 rounded-[14px] bg-inset px-3 py-2.5 text-sm">
+        <span className={cn("min-w-0 flex-1 truncate", !row.next_action && "text-muted-foreground")}>
           {row.next_action || "— no next action"}
         </span>
         <span
@@ -78,11 +80,11 @@ export function QueueRow({
         </span>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <PersonDot
           person={row.next_action_owner_person}
           withName
-          className="text-xs font-extrabold text-muted-foreground"
+          className="shrink-0 text-xs font-extrabold text-muted-foreground"
         />
         <LogContactDialog listing={row} size="default" />
       </div>

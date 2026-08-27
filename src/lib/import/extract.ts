@@ -41,6 +41,13 @@ export function importEnabled(): boolean {
 }
 
 /**
+ * How long one model call may take, and the number `/api/sync` budgets a check
+ * against. The SDK's own `maxRetries` can double it on a 429 or a 5xx, which
+ * the sync run's write headroom absorbs.
+ */
+export const MODEL_TIMEOUT_MS = 20_000;
+
+/**
  * The SDK client, built per call. Shared with `classify.ts` (the sync run's
  * second opinion) so there is one place that decides the key, the retry count
  * and the timeout — and one place that turns a missing key into
@@ -49,7 +56,7 @@ export function importEnabled(): boolean {
 export function anthropicClient(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new ImportDisabledError();
-  return new Anthropic({ apiKey, maxRetries: 1, timeout: 20_000 });
+  return new Anthropic({ apiKey, maxRetries: 1, timeout: MODEL_TIMEOUT_MS });
 }
 
 /**

@@ -29,7 +29,12 @@ export default async function AppLayout({
               built so it is not. It is here so that the day something is, the
               page still cannot be dragged sideways with every card's right
               edge hanging off the screen. */}
-          <main className="mx-auto w-full max-w-5xl overflow-x-hidden px-4 pt-2 pb-32 md:pt-4 md:pb-8">
+          {/* The bottom padding clears the floating tab bar *and* the home
+              indicator under it — the bar itself sits on
+              `mb-max(1.25rem,env(safe-area-inset-bottom))`, so the page has to
+              pay the same inset or the last card's "No fee" line hides behind
+              it on a notched phone. */}
+          <main className="mx-auto w-full max-w-5xl overflow-x-hidden px-4 pt-2 pb-[calc(8rem+env(safe-area-inset-bottom))] md:pt-4 md:pb-8">
             {children}
           </main>
         </PersonProvider>

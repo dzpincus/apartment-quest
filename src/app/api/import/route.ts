@@ -35,8 +35,13 @@ import { coerceExtract } from "@/lib/import/coerce";
 import type { ImportResponse, ImportSource } from "@/lib/import/types";
 
 export const runtime = "nodejs";
-/** Fetch (8s) + Firecrawl (15s) + Haiku (20s) will not fit in Vercel's 10s default. */
-export const maxDuration = 30;
+/**
+ * Fetch (8s) + Firecrawl (up to 40s) + Haiku (20s) will not fit in Vercel's 10s
+ * default, nor in the 30s this used to ask for: rung two now waits 40 seconds
+ * for a StreetEasy page rather than giving up at 15 and calling a slow scrape a
+ * blocked one.
+ */
+export const maxDuration = 60;
 
 const MAX_URL_CHARS = 2_048;
 const MAX_TEXT_CHARS = 200_000;
@@ -133,7 +138,11 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
       source = "direct";
     } else if (firecrawlEnabled()) {
       tried.push("firecrawl");
-      const scraped = await scrapeWithFirecrawl(url);
+      // No retry on this path. Somebody is watching this request inside a
+      // 60s function, and a second 40s attempt would spend their whole budget
+      // to reach the same paste box the first failure already offers them.
+      // The unattended crawl (`/api/sync`) has no such fallback and does retry.
+      const scraped = await scrapeWithFirecrawl(url, { retry: false });
       if (!scraped.ok) {
         console.info("[import] blocked", { host: hostOf(url), tried, reason: scraped.reason });
         return NextResponse.json({ blocked: true, reason: scraped.reason, tried });

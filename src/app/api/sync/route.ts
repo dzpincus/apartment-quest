@@ -29,10 +29,14 @@ import { cronAuthorized, hasSession, UUID_RE } from "@/lib/api-auth";
 import { adminEnabled, createAdminClient } from "@/lib/supabase/admin";
 import { listingLabel } from "@/lib/format";
 import { nowNY } from "@/lib/time";
-import { fetchPage } from "@/lib/import/fetch-page";
-import { firecrawlEnabled, scrapeWithFirecrawl } from "@/lib/import/firecrawl";
+import { FETCH_TIMEOUT_MS, fetchPage } from "@/lib/import/fetch-page";
+import {
+  FIRECRAWL_WORST_CASE_MS,
+  firecrawlEnabled,
+  scrapeWithFirecrawl,
+} from "@/lib/import/firecrawl";
 import { buildPrompt, reduceHtml } from "@/lib/import/reduce";
-import { importEnabled } from "@/lib/import/extract";
+import { importEnabled, MODEL_TIMEOUT_MS } from "@/lib/import/extract";
 import {
   blockedNote,
   CLASSIFY_CAP,
@@ -57,6 +61,7 @@ import type { ListingState, Uuid } from "@/lib/types";
 export const runtime = "nodejs";
 /** 60 listings, three at a time, a few seconds each. Comfortably inside 300s. */
 export const maxDuration = 300;
+const MAX_DURATION_MS = maxDuration * 1_000;
 
 /** Midnight and noon, New York. The whole point of the four UTC schedules. */
 const SYNC_HOURS = new Set([0, 12]);
@@ -70,12 +75,26 @@ const CONCURRENCY = 3;
  */
 const BLOCK_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000;
 /**
+ * The worst one check can cost: a direct fetch that times out, then two
+ * Firecrawl attempts and the pause between them, then a model call. ~110s.
+ */
+const WORST_CHECK_MS = FETCH_TIMEOUT_MS + FIRECRAWL_WORST_CASE_MS + MODEL_TIMEOUT_MS;
+/** Room after the pool for 60 UPDATEs and an activity row or two. */
+const WRITE_HEADROOM_MS = 10_000;
+/**
  * The wall clock, not the listing count. `maxDuration` is 300s and Vercel kills
  * the function at it — mid-write, with no response — so the pool stops handing
- * out work at 240s and the leftovers are counted rather than lost. They sort
+ * out work early and the leftovers are counted rather than lost. They sort
  * first next run: `state_checked_at` never moved, so they are the oldest rows.
+ *
+ * **The deadline is checked before a check starts, never during one**, so the
+ * budget has to leave a whole worst-case check *plus* the writes behind it —
+ * a listing picked up one millisecond inside the budget still runs to
+ * completion. Derived rather than typed in, because it stopped being true the
+ * moment Firecrawl's timeout went from 15s to 40s with a retry behind it:
+ * 240s + 110s + writes is a killed function, not a budget. Today that is 180s.
  */
-const RUN_BUDGET_MS = 240_000;
+const RUN_BUDGET_MS = MAX_DURATION_MS - WORST_CHECK_MS - WRITE_HEADROOM_MS;
 
 /** The columns a check reads. */
 type Candidate = {
