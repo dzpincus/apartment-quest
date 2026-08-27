@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Images } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -88,8 +89,9 @@ export function ListingsTable({
   const { data: locations } = useLocations();
   // The column exists only while the starred place does — see `prefs.ts`.
   const primaryId = usePrimaryLocationId(person?.id, locations);
-  // Desktop's "click through the photos" is the lightbox, opened from the row
-  // thumb. One dialog for the table, the same as the cards do it.
+  // Desktop's "click through the photos" is the lightbox, opened from the
+  // "Gallery" button in the Address cell. One dialog for the whole table, the
+  // same as the cards do it.
   const [lightbox, setLightbox] = useState<{ id: Uuid; index: number } | null>(null);
   const open = lightbox ? rows.find((row) => row.id === lightbox.id) : undefined;
 
@@ -201,27 +203,14 @@ function Row({
           scans for, and the freed width goes to it and to Amenities. */}
       <TableCell className="max-w-72">
         <span className="flex items-center gap-2">
-          {/* Small enough to sit inside the row's line height, so adding
-              photos never changes the table's rhythm. A row with photos makes
-              it a button: 40px is too small to browse in, and the lightbox's
-              arrows are the desktop version of the cards' swipe. With no
-              photos it stays the inert alignment tile it has always been. */}
-          {photos > 0 ? (
-            <button
-              type="button"
-              onClick={onOpenPhotos}
-              aria-label={`Open ${photos} ${photos === 1 ? "photo" : "photos"} of ${row.address}`}
-              className="shrink-0 rounded-2xl focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
-            >
-              <ListingThumb
-                photo={row.photos[0]}
-                alt=""
-                className="size-10 transition-opacity hover:opacity-80"
-              />
-            </button>
-          ) : (
-            <ListingThumb photo={undefined} alt="" className="size-10" />
-          )}
+          {/* Small enough to sit inside the row's line height, and inert
+              whether or not there are photos: a 40px picture is too small to
+              browse in and, as a button, it hid the only way into the
+              lightbox under an image nobody reads as clickable. Browsing is
+              the labelled "Gallery" button below. The tile stays because a
+              list where some rows start at an image and others at the address
+              reads as broken alignment. */}
+          <ListingThumb photo={row.photos?.[0]} alt="" className="size-10" />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <Link
@@ -233,15 +222,36 @@ function Row({
               <UnreadBadge count={unread} />
               <GoneBadge state={row.listing_state} note={row.state_note} listing={row} />
             </span>
-            <InlineEdit
-              label="unit"
-              value={row.unit}
-              placeholder="+ unit"
-              className="text-xs text-muted-foreground"
-              inputClassName="h-6"
-              onSave={(raw) => save({ unit: toTextOrNull(raw) })}
-              display={row.unit ? `#${row.unit}` : undefined}
-            />
+            {/* Unit and the way into the photos share the second line: the
+                button says "Gallery · 8" rather than relying on a thumbnail
+                to advertise itself, and it only exists when there is
+                something to open. `InlineEdit` is `w-full` by its own
+                stylesheet, so it gets the flexible half and the button the
+                fixed one. */}
+            <span className="flex items-center gap-1.5">
+              <span className="min-w-0 flex-1">
+                <InlineEdit
+                  label="unit"
+                  value={row.unit}
+                  placeholder="+ unit"
+                  className="text-xs text-muted-foreground"
+                  inputClassName="h-6"
+                  onSave={(raw) => save({ unit: toTextOrNull(raw) })}
+                  display={row.unit ? `#${row.unit}` : undefined}
+                />
+              </span>
+              {photos > 0 && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={onOpenPhotos}
+                  aria-label={`Open ${photos} ${photos === 1 ? "photo" : "photos"} of ${row.address}`}
+                >
+                  <Images />
+                  Gallery · {photos}
+                </Button>
+              )}
+            </span>
           </span>
         </span>
       </TableCell>

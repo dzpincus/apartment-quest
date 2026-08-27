@@ -288,9 +288,24 @@ and `prefetchPhotos` (`src/lib/photos-client.ts`) warms the whole set, because
 sixty cards × eight photos is 480 requests for a page nobody has scrolled. A
 tap that was not a swipe opens the same `PhotoLightbox` the detail gallery
 uses; the map's mini card is the same carousel at 16:9. The table keeps its
-40px thumb, now a button that prefetches and opens that lightbox — 40px is too
-small to browse in — and a listing with no photos still falls back to a
-`bg-inset` tile with a lucide `Image` glyph so the rows stay aligned. The
+40px thumb as a plain, inert image — 40px is too small to browse in, and a
+picture is not a control — and puts a labelled **"Gallery · 8"** button
+(lucide `Images`, `secondary`/`sm`) on the second line of the Address cell,
+next to the unit, for rows that have photos: it prefetches the set and opens
+the same shared lightbox at index 0. A listing with no photos gets no button
+and still falls back to a `bg-inset` tile with a lucide `Image` glyph so the
+rows stay aligned. Both places that
+show a photo at size — the lightbox and the carousel — carry a **Full screen**
+toggle in the corner of the image box (`useFullscreen` in
+`src/lib/use-fullscreen.ts`, `FullscreenButton`): it takes *that element* full
+screen, so the arrows, the swipe and the counter keep working, and the slides
+switch to `object-contain` on black because a 16:10 crop is right for a card
+and wrong for a whole screen. `fullscreenSupported(doc, el)` is the pure,
+tested half — iPhone Safari has element full screen for `<video>` and nothing
+else, so there the carousel's button opens the lightbox instead (same answer,
+same tap) and the lightbox, already the size of the viewport, shows no button
+at all. Escape is the browser's; `fullscreenchange` is the only thing that
+flips the icon. The
 arithmetic (`nextIndex`, `prevIndex`, `slidesToRender`) sits in
 `src/lib/carousel.ts`, pure and tested. `listing_photos` is in the realtime
 publication and maps to the `listings` / `listing(id)` keys, which is what

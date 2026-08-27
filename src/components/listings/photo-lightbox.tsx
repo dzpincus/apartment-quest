@@ -8,6 +8,12 @@
  * The counter ("3 / 9") is what tells you the swipe worked when the next photo
  * has not decoded yet.
  *
+ * The image box can also go true full screen (`useFullscreen`), which is a
+ * different thing from this dialog: the browser's own surface, no chrome, no
+ * 75dvh cap, Escape handled natively. Where element full screen does not exist
+ * (iPhone Safari) the toggle is simply absent — this dialog already fills the
+ * viewport there, which is exactly what the button would have bought.
+ *
  * The images are plain `<img>` tags, not `next/image`: they come from a public
  * Supabase bucket, they are already re-encoded to 1280px webp by
  * `/api/photos`, and the optimiser would only re-fetch and re-compress work
@@ -17,7 +23,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { FullscreenButton } from "@/components/listings/fullscreen-button";
 import { photoUrl } from "@/lib/photos-client";
+import { useFullscreen } from "@/lib/use-fullscreen";
+import { cn } from "@/lib/utils";
 import type { PhotoRef } from "@/lib/queries";
 
 /** Below this a swipe is a scroll or a fat finger, not an instruction. */
@@ -40,6 +49,8 @@ export function PhotoLightbox({
   const open = index !== null && photos.length > 0;
   const current = open ? photos[Math.min(index, photos.length - 1)] : undefined;
   const startX = useRef<number | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const fullscreen = useFullscreen(box);
 
   const step = useCallback(
     (delta: number) => {
@@ -78,7 +89,13 @@ export function PhotoLightbox({
         </DialogTitle>
 
         <div
-          className="relative flex touch-pan-y items-center justify-center overflow-hidden rounded-2xl bg-inset"
+          ref={box}
+          className={cn(
+            "relative flex touch-pan-y items-center justify-center overflow-hidden rounded-2xl bg-inset",
+            // Full screen is the browser's black surface, not a card: the
+            // rounding and the inset colour would both read as a bug there.
+            fullscreen.active && "size-full rounded-none bg-black",
+          )}
           onPointerDown={(event) => {
             startX.current = event.clientX;
           }}
@@ -102,14 +119,42 @@ export function PhotoLightbox({
             width={current.width ?? undefined}
             height={current.height ?? undefined}
             draggable={false}
-            className="max-h-[75dvh] w-auto max-w-full rounded-2xl object-contain select-none"
+            className={cn(
+              "w-auto max-w-full rounded-2xl object-contain select-none",
+              fullscreen.active
+                ? "max-h-full rounded-none"
+                : // Room for the counter and the dialog's own padding.
+                  "max-h-[75dvh]",
+            )}
           />
 
           {photos.length > 1 && (
             <>
               <Arrow side="left" onClick={() => step(-1)} />
               <Arrow side="right" onClick={() => step(1)} />
+
+              {/* The counter below the picture is outside the element that
+                  goes full screen, so it stops existing there. This one only
+                  appears when that happens. */}
+              {fullscreen.active && (
+                <span
+                  className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-2.5 py-1 text-xs font-extrabold text-white tabular-nums"
+                  aria-hidden="true"
+                >
+                  {(index ?? 0) + 1} / {photos.length}
+                </span>
+              )}
             </>
+          )}
+
+          {/* Top *left*: the dialog's close button owns the top right, and two
+              round buttons in one corner is a mis-tap waiting to happen. */}
+          {fullscreen.supported && (
+            <FullscreenButton
+              active={fullscreen.active}
+              onClick={fullscreen.toggle}
+              className="top-2 left-2"
+            />
           )}
         </div>
 

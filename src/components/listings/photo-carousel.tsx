@@ -30,6 +30,14 @@
  * positioned within the fixed-aspect box, the vertical space they occupy is
  * space the picture already owns. They can never land on the address.
  *
+ * **Full screen is the same box, bigger.** The toggle in the top-right corner
+ * takes *this* element full screen, so the swipe, the arrows, the counter and
+ * the index all keep working — there is no second component to keep in sync.
+ * The slides switch from `object-cover` to `object-contain` on black there: a
+ * 16:10 crop is right for a card and wrong for a whole screen. Where element
+ * full screen does not exist (iPhone Safari) the button opens the lightbox
+ * instead, which is the same answer at the same tap.
+ *
  * Images are plain `<img>` from the public bucket with a two-rendition
  * `srcSet`: the 400px thumb for a narrow low-DPR card, the 1280px main image
  * for everything else. `next/image` would re-fetch and re-compress work
@@ -38,8 +46,10 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight, Image as ImageIcon } from "lucide-react";
+import { FullscreenButton } from "@/components/listings/fullscreen-button";
 import { photoUrl, prefetchPhotos } from "@/lib/photos-client";
 import { nextIndex, prevIndex, slidesToRender } from "@/lib/carousel";
+import { useFullscreen } from "@/lib/use-fullscreen";
 import { cn } from "@/lib/utils";
 import type { PhotoRef } from "@/lib/queries";
 
@@ -70,9 +80,13 @@ export function PhotoCarousel({
   onOpen?: (index: number) => void;
 }) {
   const count = photos.length;
+  const boxRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const fullscreen = useFullscreen(boxRef);
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState(false);
+  /** The index the full-screen effect reads, so it is not keyed on the index. */
+  const indexRef = useRef(0);
   const reduced = usePrefersReducedMotion();
   /** Where a pointer went down, so a drag can be told from a tap. */
   const down = useRef<{ x: number; y: number } | null>(null);
@@ -122,6 +136,26 @@ export function PhotoCarousel({
     };
   }, []);
 
+  useEffect(() => {
+    indexRef.current = index;
+  }, [index]);
+
+  // Entering or leaving full screen is a resize of the scroll container, and a
+  // scroll container keeps its `scrollLeft`, not its slide: without this, photo
+  // 3 of 9 becomes a seam between 1 and 2. Jumps rather than animates — the
+  // screen has just changed size, a 300ms glide on top of that reads as a bug.
+  const fullscreenActive = fullscreen.active;
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    // One frame later: the new size is not laid out at the moment the event
+    // fires, so `clientWidth` here is still the old box's.
+    const id = requestAnimationFrame(() => {
+      el.scrollTo({ left: indexRef.current * el.clientWidth, behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [fullscreenActive]);
+
   if (count === 0) {
     // The same tile `ListingThumb` falls back to, at the carousel's shape: a
     // list where some cards start with a picture and others start with the
@@ -144,6 +178,7 @@ export function PhotoCarousel({
 
   return (
     <div
+      ref={boxRef}
       role="region"
       aria-roledescription="carousel"
       aria-label={`${alt} — ${count} ${count === 1 ? "photo" : "photos"}`}
@@ -158,6 +193,9 @@ export function PhotoCarousel({
         "relative w-full overflow-hidden rounded-2xl border-2 border-border bg-inset",
         "focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none",
         ASPECT[aspect],
+        // Full screen is a screen, not a card: the card's shape, border and
+        // rounding all have to go, and the letterboxing is black.
+        fullscreen.active && "aspect-auto size-full rounded-none border-0 bg-black",
         className,
       )}
     >
@@ -176,8 +214,10 @@ export function PhotoCarousel({
           const moved =
             Math.abs(event.clientX - from.x) > TAP_SLOP_PX ||
             Math.abs(event.clientY - from.y) > TAP_SLOP_PX;
-          // A swipe that ends over the picture is not a request to open it.
-          if (!moved) onOpen(index);
+          // A swipe that ends over the picture is not a request to open it —
+          // and in full screen neither is a tap: the lightbox would open
+          // behind the browser's own surface, where nobody can see it.
+          if (!moved && !fullscreen.active) onOpen(index);
         }}
         onPointerCancel={() => {
           down.current = null;
@@ -212,7 +252,10 @@ export function PhotoCarousel({
                 loading={i === 0 ? "eager" : "lazy"}
                 decoding="async"
                 draggable={false}
-                className="size-full object-cover select-none"
+                className={cn(
+                  "size-full select-none",
+                  fullscreen.active ? "object-contain" : "object-cover",
+                )}
               />
             ) : (
               /* Not a spinner: this box is only ever seen for the instant
@@ -224,6 +267,22 @@ export function PhotoCarousel({
           </div>
         ))}
       </div>
+
+      {/* Top right is the one corner with nothing in it: the arrows are
+          vertically centred and the counter is bottom right. Present whenever
+          it can do something — element full screen, or the lightbox where
+          that does not exist. */}
+      {(fullscreen.supported || onOpen) && (
+        <FullscreenButton
+          active={fullscreen.active}
+          onClick={() => {
+            // Every slide has to be real before the box triples in size.
+            arm();
+            if (!fullscreen.toggle()) onOpen?.(index);
+          }}
+          className="top-1.5 right-1.5 size-8 md:size-9"
+        />
+      )}
 
       {count > 1 && (
         <>
