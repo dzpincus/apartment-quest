@@ -49,5 +49,5 @@ if (!getWorkerUrl()) {
   setWorkerUrl(MAPLIBRE_WORKER_URL);
 }
 
-export { LngLatBounds, Map as MapLibreMap, Marker } from "maplibre-gl";
+export { LngLatBounds, Map as MapLibreMap, Marker, NavigationControl } from "maplibre-gl";
 export type { MapOptions } from "maplibre-gl";

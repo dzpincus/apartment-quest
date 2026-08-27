@@ -10,15 +10,20 @@
  * through the big one would have cost more than the forty lines below. Both
  * share the style, the pin builders and the CSS.
  *
- * Frozen until somebody asks to move the pin: a card you scroll past should
- * not steal a two-finger gesture from the page.
+ * Zoomable, so "where is this in the neighbourhood" can be answered by
+ * pulling back to the saved places — but **cooperative**: a card you scroll
+ * past must not steal the page's scroll. MapLibre's `cooperativeGestures`
+ * makes a plain wheel scroll the page (ctrl/⌘ + wheel zooms the map) and a
+ * one-finger touch scroll the page (two fingers pan and pinch), and the +/−
+ * buttons always work. Built once: only the pin's draggability changes with
+ * `movable`, and that is a marker option, not a map one.
  */
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 // Not `maplibre-gl` directly: that module sets the worker URL, which Turbopack
 // otherwise leaves empty. See `maplibre.ts`.
-import { MapLibreMap, Marker, type MapOptions } from "@/components/map/maplibre";
+import { MapLibreMap, Marker, NavigationControl, type MapOptions } from "@/components/map/maplibre";
 import { loadMapStyle, MAP_STYLE_FAILED_MESSAGE } from "@/components/map/map-style";
 import { ensureMapCss, listingPinElement, locationPinElement } from "@/components/map/pin";
 import { cn } from "@/lib/utils";
@@ -34,7 +39,7 @@ export type MiniMapProps = {
   ariaLabel: string;
   locations: Location[];
   primaryLocationId?: Uuid | null;
-  /** Turns on panning, zooming and drag-to-correct. */
+  /** Turns on drag-to-correct for the listing pin. */
   movable?: boolean;
   onMove?: (coords: { lat: number; lng: number }) => void;
   className?: string;
@@ -69,8 +74,6 @@ export function MiniMap({
   // silent grey rectangle on the detail card looked like a bug in the pin.
   const [failed, setFailed] = useState(false);
 
-  // The map is built once per (movable) mode: `interactive` is a constructor
-  // option, so flipping "Move pin" genuinely is a new map.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -85,9 +88,16 @@ export function MiniMap({
           style: style as unknown as MapOptions["style"],
           center: [lng, lat],
           zoom: 14.5,
-          interactive: movable,
+          cooperativeGestures: true,
+          // Two axes are plenty on a 200px card; a tilted, rotated
+          // neighbourhood is harder to read, not easier.
+          dragRotate: false,
+          pitchWithRotate: false,
+          touchPitch: false,
           attributionControl: { compact: true },
         });
+        map.touchZoomRotate.disableRotation();
+        map.addControl(new NavigationControl({ showCompass: false }), "top-right");
         mapRef.current = map;
         map.on("load", () => {
           if (!cancelled) setReady(true);
@@ -111,14 +121,15 @@ export function MiniMap({
     // Coordinates are handled by the effect below — re-creating the map when a
     // drag lands would throw the tiles away mid-gesture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movable]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    // Moving is a `setLngLat`; a re-let at a new rent is a different pin, so
-    // the element is rebuilt only when what it *says* changes.
-    const key = `${label}|${color}|${ariaLabel}`;
+    // Moving is a `setLngLat`; a re-let at a new rent is a different pin, and
+    // `draggable` is a constructor option, so the element is rebuilt only when
+    // what it *says* or whether it can be dragged changes.
+    const key = `${label}|${color}|${ariaLabel}|${movable}`;
     if (pinRef.current && pinKeyRef.current === key) {
       pinRef.current.setLngLat([lng, lat]);
     } else {
@@ -134,8 +145,13 @@ export function MiniMap({
       pinRef.current = marker;
       pinKeyRef.current = key;
     }
-    map.setCenter([lng, lat]);
   }, [lat, lng, label, color, ariaLabel, movable, ready]);
+
+  // Re-centre only when the pin actually moves — not when "Move pin" is
+  // toggled, which would snap a zoomed-out map back in on the person using it.
+  useEffect(() => {
+    mapRef.current?.setCenter([lng, lat]);
+  }, [lat, lng, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -162,9 +178,9 @@ export function MiniMap({
           "aq-map h-[200px] w-full overflow-hidden rounded-2xl border-2 border-border bg-[#1a1836]",
           className,
         )}
-        // A frozen map is a picture; a movable one is a control surface, and
-        // calling it an image would hide the draggable pin from a screen reader.
-        role={movable ? "region" : "img"}
+        // A control surface, not a picture: it zooms, and sometimes the pin
+        // drags. Calling it an image would hide both from a screen reader.
+        role="region"
         aria-label={movable ? `${ariaLabel} — drag the pin to correct it` : ariaLabel}
       />
       {failed && (

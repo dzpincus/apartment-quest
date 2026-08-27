@@ -769,7 +769,11 @@ JSON file: upstream can add a layer without us shipping a style that rots.
 ~250KB gzipped, so `MapPanel` (which pulls in `ListingsMap`, which pulls in
 MapLibre) and the detail card's `MiniMap` are both `next/dynamic` with
 `ssr: false`. The chunk is fetched the first time somebody flips to Map and
-never on the list. MapLibre's stylesheet is imported *inside* those components
+never on the list. `MiniMap` is built once and is **zoomable but
+cooperative**: `cooperativeGestures` makes a plain wheel or one-finger touch
+scroll the page (ctrl/⌘ + wheel zooms, two fingers pan and pinch), the +/−
+`NavigationControl` always works, and "Move pin" only rebuilds the *marker* as
+draggable — the map is never torn down for a mode flip. MapLibre's stylesheet is imported *inside* those components
 rather than in `globals.css`, and the pins' own CSS is a `<style>` tag injected
 by `ensureMapCss()` on first mount — no route pays for a rule about `.aq-pin`
 until it has actually asked for a map.

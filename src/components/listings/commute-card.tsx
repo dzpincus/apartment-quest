@@ -72,15 +72,14 @@ export function CommuteCard({ listing }: { listing: ListingRow }) {
    *
    * Latched, and that is the whole point of the state: a landed drag writes
    * `geocode_note: 'manual'`, so `status` stops being `"check"` the instant
-   * somebody lets go of the pin. `movable` is MapLibre's `interactive`, which
-   * is a *constructor* option — flipping it back destroys the map and builds a
-   * frozen one in its place, one tick after a drop, which read as the app
-   * snatching the map away as a reward for using it.
+   * somebody lets go of the pin. `movable` rebuilds the pin as a draggable
+   * marker — flipping it back a tick after a drop read as the app snatching
+   * the pin away as a reward for using it.
    */
   const [offered, setOffered] = useState(status === "check");
   // Adjusted during render rather than in an effect: React's own answer for
-  // state derived from a prop that has changed, and it means the map is never
-  // built frozen and then rebuilt movable a tick later.
+  // state derived from a prop that has changed, and it means the pin is never
+  // built inert and then rebuilt draggable a tick later.
   const [lastStatus, setLastStatus] = useState(status);
   if (status !== lastStatus) {
     setLastStatus(status);

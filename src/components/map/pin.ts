@@ -148,6 +148,7 @@ export const MAP_CSS = `
 .aq-map .maplibregl-ctrl-group button + button { border-top: 1px solid #3c3778; }
 .aq-map .maplibregl-ctrl-group button span { filter: invert(1); }
 .aq-map .maplibregl-canvas { outline: none; }
+.aq-map .maplibregl-cooperative-gesture-screen { font-size: 0.85rem; font-weight: 700; background: rgba(26,24,54,0.7); }
 `;
 
 const STYLE_ID = "aq-map-css";
