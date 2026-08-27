@@ -443,13 +443,20 @@ and a tap that navigates instead of opening.
 
 **Two statuses, said out loud.** `status` is where WE are (saved → contacted →
 applied, ours, `StatusSelect`) and `listing_state` is what the SITE says (0006,
-the sync's). The filters sheet says exactly that under its title, the
-link-state filter's options all read "Link: …" so they cannot be mistaken for
-the other control, and its chips shorten to "Gone" / "Live" / "Unchecked".
-`linkState` (`matchesLinkState`, tested) is the fourteenth filter:
-`live` is `active` only, `gone` is `isVanished`, `unchecked` is `unknown` *and*
-a null column — a pre-0006 row and a row nobody has looked at are the same
-absence. `StatusSelect`'s trigger is tinted from `STATUS_TONE` (`format.ts`,
+the sync's). The filters sheet says exactly that under its title, and
+the link-state filter's options all read "Link: …" so they cannot be mistaken
+for the other control. `linkState` (`matchesLinkState`, tested) is the
+fourteenth filter and opens on `not_gone` — "Link: live + unchecked" — which
+holds back `off_market` / `removed` rows and is the one value that does *not*
+count as an active filter or wear a chip, because the default is the table's
+resting state and not something somebody set. Every other pick does: the chips
+read "Link: Any" / "Link: Gone" / "Link: Live" / "Link: Unchecked", where
+`live` is `active` only, `gone` is `isVanished`, and `unchecked` is `unknown`
+*and* a null column — a pre-0006 row and a row nobody has looked at are the
+same absence. What the default hides is said out loud: `hiddenGoneCount`
+(`src/lib/listing-filters.ts`) counts those rows against every *other* filter
+and the toolbar draws "N gone hidden · show", which sets `linkState` to
+`any`. `StatusSelect`'s trigger is tinted from `STATUS_TONE` (`format.ts`,
 semantic tokens only — grey, `--quiet`, `--due`, lavender, `--yes`, and a faint
 strike-through for passed/lost), because seven identical grey dropdowns down a
 table is not a column anybody can read.
