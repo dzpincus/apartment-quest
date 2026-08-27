@@ -2,6 +2,12 @@
   "name": "apartment-quest",
   "version": "0.1.0",
   "private": true,
+  "description": "Private NYC apartment-hunt tracker for four people: listings, URL import, a forced follow-up queue, chat, votes, maps and cached commute times.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dzpincus/apartment-quest.git"
+  },
   "scripts": {
     "dev": "node scripts/copy-maplibre-worker.mjs && next dev",
     "build": "node scripts/copy-maplibre-worker.mjs && next build",
@@ -50,5 +56,8 @@
     "typescript": "^5",
     "vitest": "^4.1.11"
   },
-  "packageManager": "pnpm@11.2.2"
+  "packageManager": "pnpm@11.2.2",
+  "engines": {
+    "node": ">=20.9"
+  }
 }

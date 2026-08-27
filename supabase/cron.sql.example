@@ -18,7 +18,7 @@
 -- updating instead. Both branches are here; keep whichever applies.
 
 select vault.create_secret(
-  'https://apartment-quest.vercel.app/api/sync',
+  'https://<your-deployment>.vercel.app/api/sync',
   'sync_url',
   'Apartment Quest — the sync endpoint pg_cron POSTs to'
 );
@@ -33,7 +33,7 @@ select vault.create_secret(
 --
 --   select vault.update_secret(
 --     (select id from vault.secrets where name = 'sync_url'),
---     'https://apartment-quest.vercel.app/api/sync'
+--     'https://<your-deployment>.vercel.app/api/sync'
 --   );
 --   select vault.update_secret(
 --     (select id from vault.secrets where name = 'cron_secret'),

@@ -10,7 +10,10 @@ import "server-only";
  * 2. **Nominatim** (OpenStreetMap), bounded to a New York viewbox, only when
  *    rung one found nothing. Their usage policy is one request per second and
  *    a real `User-Agent` with a contact address, both of which are honoured
- *    here — which is also why it is the fallback and not the default.
+ *    here — which is also why it is the fallback and not the default. The
+ *    contact comes from `NOMINATIM_CONTACT`; with it unset the rung is skipped
+ *    rather than called anonymously, because an anonymous call is the one that
+ *    gets the whole project blocked.
  *
  * Both hosts are constants in this file. Nothing a person types reaches a URL
  * except as a query-string value, so there is no SSRF surface to guard: the
@@ -54,8 +57,24 @@ export const LOW_CONFIDENCE = 0.7;
 const GEOSEARCH_URL = "https://geosearch.planninglabs.nyc/v2/search";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 
-/** Their policy: identify yourself, with a way to be shouted at. */
-const NOMINATIM_UA = "apartment-quest (lohikansun@gmail.com)";
+/**
+ * Their policy: identify yourself, with a way to be shouted at. `contact` is
+ * whatever reaches a human — an email address, or the repository URL.
+ *
+ * Deliberately not a constant with somebody's address baked into it: this is a
+ * public repository, and a hard-coded contact is both a published email and a
+ * lie the moment anyone else runs the code. Unset means the rung is skipped;
+ * see `nominatim`.
+ */
+export function nominatimUserAgent(): string | null {
+  const contact = process.env.NOMINATIM_CONTACT?.trim();
+  return contact ? `apartment-quest (${contact})` : null;
+}
+
+/** Whether rung two will run at all. False without `NOMINATIM_CONTACT`. */
+export function nominatimEnabled(): boolean {
+  return nominatimUserAgent() !== null;
+}
 
 /** Roughly the five boroughs plus a margin. `left,top,right,bottom`. */
 const NYC_VIEWBOX = "-74.3,40.95,-73.7,40.5";
@@ -180,11 +199,19 @@ function throttleNominatim<T>(run: () => Promise<T>): Promise<T> {
 }
 
 async function nominatim(text: string): Promise<GeocodeResult | null> {
+  const userAgent = nominatimUserAgent();
+  // No contact, no call. Nominatim blocks anonymous traffic and the ladder is
+  // designed to survive rung two being absent: the caller reads a null here as
+  // "not found", which is what an unconfigured fallback honestly is.
+  if (!userAgent) {
+    console.info("[geocode] nominatim disabled: set NOMINATIM_CONTACT");
+    return null;
+  }
   const url =
     `${NOMINATIM_URL}?q=${encodeURIComponent(text)}` +
     `&format=jsonv2&limit=1&viewbox=${NYC_VIEWBOX}&bounded=1`;
   const body = (await throttleNominatim(() =>
-    getJson(url, { "User-Agent": NOMINATIM_UA }),
+    getJson(url, { "User-Agent": userAgent }),
   )) as { lat?: unknown; lon?: unknown; importance?: unknown }[] | null;
   const hit = Array.isArray(body) ? body[0] : null;
   if (!hit) return null;

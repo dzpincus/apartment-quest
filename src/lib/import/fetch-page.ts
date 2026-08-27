@@ -12,9 +12,9 @@ import "server-only";
  *
  * Known and accepted: this is a check-then-use race (the DNS answer we
  * validate is not provably the one the socket uses). Closing that needs a
- * custom agent with a per-connection callback; for a four-person app where
- * the only people who can reach this route are the four of us, the guard above
- * is the right amount of paranoia.
+ * custom agent with a per-connection callback; for an app where the route is
+ * session-gated, so the caller is already trusted to the extent the app trusts
+ * anyone, the guard above is the right amount of paranoia.
  */
 
 import { lookup } from "node:dns/promises";

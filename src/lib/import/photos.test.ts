@@ -59,7 +59,7 @@ describe("discoverPhotos — a Zillow-shaped page", () => {
 describe("discoverPhotos — a real Zillow head, where the photos are buried", () => {
   const photos = discoverPhotos(ZILLOW_REAL, {
     baseUrl:
-      "https://www.zillow.com/homedetails/101-Patchen-Ave-DPX-Brooklyn-NY-11221/2054843234_zpid/",
+      "https://www.zillow.com/homedetails/123-Example-St-APT-2-Brooklyn-NY-11201/1000000001_zpid/",
   });
 
   it("returns photos, not the bundles that share the CDN host", () => {

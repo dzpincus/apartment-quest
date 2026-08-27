@@ -42,6 +42,7 @@ Server-only vars (never `NEXT_PUBLIC_`, never read from a client component):
 | `CRON_SECRET` | Listing status sync. The bearer token pg_cron sends to `/api/sync`, compared in constant time. Missing -> every cron call is a 401; "Check now" still works, since that path uses the session. Also accepted by `/api/geocode` and `/api/commutes` (`src/lib/api-auth.ts`). |
 | `GOOGLE_MAPS_API_KEY` | Commute times. Google Routes API only, server-only. Missing -> `/api/commutes` returns 503 `{disabled:true}`, the commute cards show "—" and nothing else breaks. The map itself needs no key. |
 | `AQ_ROUTES_LIVE` | Optional escape hatch. Outside production (`VERCEL_ENV !== "production"`) `computeRoute` does **not** call Google unless this is `1`: it logs `[routes] DRY-RUN` and returns `{ok:false, error:"dry-run (non-production)"}`. Previews and dev share the one key and the one free tier, and one preview branch backfilling 60 listings × 5 places is 900 calls nobody meant to buy. Dry-run rows carry the one-hour error TTL, so a preview cannot pin a month of em dashes onto rows production reads. |
+| `NOMINATIM_CONTACT` | Optional. An email address or repo URL for rung two of the geocode ladder's `User-Agent` (`apartment-quest (<contact>)`), which Nominatim's usage policy requires. Missing -> that rung is skipped and logs `[geocode] nominatim disabled: set NOMINATIM_CONTACT`; NYC GeoSearch (rung one) still places almost every New York address. Never call them anonymously — that is what gets an application blocked. |
 
 Missing env does not break `pnpm build` — Supabase clients only throw when
 constructed at runtime, and the import route reads its key inside the request.
@@ -51,7 +52,7 @@ constructed at runtime, and the import route reads its key inside the request.
 SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
 
 - `supabase/migrations/0001_schema.sql` — tables + indexes
-- `supabase/migrations/0002_rls.sql` — RLS on every table, one `authenticated` policy each
+- `supabase/migrations/0002_rls.sql` — RLS on every table, one `authenticated` policy each (the predicate is superseded by 0011; the policy names and shape are not)
 - `supabase/migrations/0003_rpc_triggers.sql` — `set_updated_at`, `merge_listings`, `unread_counts`, realtime publication
 - `supabase/migrations/0004_review_fixes.sql` — `log_interaction`, `mark_thread_read`,
   `merge_listings` redefined (follow-up columns carried across, merged targets
@@ -84,12 +85,39 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   `locations` and `commute_times` tables (RLS + realtime), the two
   `listings_address_changed` triggers, and `merge_listings` redefined a seventh
   time (coordinates carried across, `commute_times` repointed)
+- `supabase/migrations/0011_rls_hardening.sql` — `public.app_config`
+  (RLS on, **no policies**, revoked from `anon`/`authenticated`) and
+  `public.is_app_user()`, a `stable security definer` function that is true only
+  for the uid stored there. Every `_authenticated` policy from 0002/0007/0010 is
+  redefined against it, as are the three `storage.objects` policies. The uid
+  itself is **not** in the repo: it goes in by hand from
+  `supabase/owner.sql.example`, and **until it does, `is_app_user()` is false
+  and every table reads empty** — 0011 fails closed on purpose, so the two run
+  in the same sitting. A custom GUC (`alter database postgres set
+  app.owner_uid`) would have been tidier and is not available: Supabase's
+  `postgres` is not a superuser and answers `42501`. Photos are unaffected —
+  the public-object endpoint `photoUrl()` builds does not consult RLS at all,
+  so tightening `"photos public read"` closes the authenticated storage API and
+  nothing a browser renders. This is defence in depth on top of "signups off,
+  anonymous off": those are dashboard checkboxes, and `auth.role() =
+  'authenticated'` means "any session Supabase will issue" the moment one gets
+  un-ticked
 - `supabase/seed.sql` — the four people (idempotent)
 
-Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
-MCP `apply_migration` tool — except 0006, which is the one file whose number is
-older than its contents and goes last. New changes go in a new numbered file; never edit an
-applied one.
+Apply via the Supabase SQL editor (paste + run) or the Supabase MCP
+`apply_migration` tool, in **this** order:
+
+```
+0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011
+```
+
+Filename order everywhere except the one swap: **0007 (photos) applies before
+0006 (listing sync)**, because photos shipped first and took the next free
+number while 0006 was written afterwards against a schema that already had it.
+0006 is not "last" — 0008 onwards genuinely follow it. Then `seed.sql`, then
+`owner.sql.example` with your auth user's uid filled in (0011 leaves the app
+dark until that row exists). New changes go in a new numbered file; never edit
+an applied one.
 
 `merge_listings` is defined seven times — 0003, 0004, 0005, 0007, 0008 and 0009
 are history, 0010 is the live version.
@@ -521,7 +549,7 @@ are free or nearly so, and the expensive one is metered on purpose.
 | Job | Provider | Cost | Key |
 |---|---|---|---|
 | Tiles / map rendering | MapLibre GL JS + **OpenFreeMap** (`tiles.openfreemap.org/styles/dark`, repainted Dusk Candy) | $0 | none |
-| Geocoding | **NYC GeoSearch** (`geosearch.planninglabs.nyc`, Pelias, NYC-only), fallback **Nominatim** | $0 | none |
+| Geocoding | **NYC GeoSearch** (`geosearch.planninglabs.nyc`, Pelias, NYC-only), fallback **Nominatim** | $0 | none; `NOMINATIM_CONTACT` optional, and without it the fallback is skipped |
 | Walk / bike / transit durations | **Google Routes API** `computeRoutes` | free tier 10k calls/mo | `GOOGLE_MAPS_API_KEY`, server-only |
 | Subway stations | NYC Open Data / MTA export, bundled at `public/data/subway-stations.geojson` | $0 | none, no request |
 
@@ -619,10 +647,17 @@ the host.
 
 **Nominatim's policy is honoured, not assumed**: one request per second
 (serialised through a queue in `geocode.ts`, so "Locate all" waits its turn
-rather than getting us banned) and `User-Agent: apartment-quest
-(lohikansun@gmail.com)`. It is the fallback and not the default, and anything it
-answers is flagged low-confidence by definition — rung one is the one that
-actually knows New York.
+rather than getting us banned) and `User-Agent: apartment-quest (<contact>)`,
+built by `nominatimUserAgent()` from **`NOMINATIM_CONTACT`** — an email address
+or the URL of your fork. This is a public repository, so that contact is
+configuration rather than a constant: a baked-in address is both a published
+email and a lie the moment somebody else runs the code. **Unset means the rung
+is skipped**, logging `[geocode] nominatim disabled: set NOMINATIM_CONTACT` and
+returning null, which the ladder reads as "not found" — an anonymous call is
+the one that gets the whole project blocked, so there is no fall-through to
+one. It is the fallback and not the default, and anything it answers is flagged
+low-confidence by definition — rung one is the one that actually knows New
+York.
 
 **Attribution is not optional.** MapLibre's attribution control stays visible on
 every map (OpenFreeMap + © OpenStreetMap contributors — or © OpenStreetMap
@@ -933,4 +968,10 @@ important on `bg-inset`.
 - Types in `src/lib/types.ts` are hand-written and must be updated alongside any
   schema migration.
 - There is no per-person security boundary. One shared login, everyone sees and
-  edits everything. Intentional.
+  edits everything. Intentional. What there *is*, since 0011, is a boundary
+  around the login itself: every policy tests `public.is_app_user()`, so the
+  database answers one nominated uid rather than "anyone Supabase issued a JWT
+  to". Between the four of us that changes nothing; it is what makes a stray
+  anonymous sign-in or an accidentally re-opened signup form a dead end instead
+  of a full read. Adding a fifth person is still a `people` row — the pin is on
+  the auth account, not the roster.

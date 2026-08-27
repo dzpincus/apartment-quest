@@ -1,0 +1,49 @@
+-- Apartment Quest — the owner uid. NOT a migration.
+--
+-- `0011_rls_hardening.sql` replaces every policy's `auth.role() =
+-- 'authenticated'` with `public.is_app_user()`, which is true only for the one
+-- uid named here. This file is the other half of it, and it lives outside
+-- `supabase/migrations/` for the same reason `cron.sql.example` does: the value
+-- is deployment-specific, so committing it would make a fork's copy wrong.
+--
+-- Run it once per project, in the Supabase SQL editor or via the Supabase MCP
+-- `execute_sql` tool, immediately after 0011. Until it has run, `is_app_user()`
+-- is false for everybody and every table reads empty — 0011 fails closed by
+-- design, so the app is dark in between.
+--
+-- The uid is NOT a secret. It is in every JWT the browser already holds, and
+-- knowing it buys nothing without the password. It is configuration.
+
+-- 1. the uid -----------------------------------------------------------------
+-- Supabase dashboard → Authentication → Users → your one user → copy "User UID"
+-- (a uuid like 3f6b2c10-9c4e-4a58-b1d2-7e0a5c8f1234).
+--
+-- Upsert, not insert: re-running this after rotating the auth user re-points
+-- the pin rather than erroring on the primary key.
+insert into public.app_config (key, value)
+values ('owner_uid', 'REPLACE_WITH_AUTH_USER_UID')
+on conflict (key) do update set value = excluded.value;
+
+-- 2. check it took ------------------------------------------------------------
+-- Reads the row back. The SQL editor connects as `postgres`, which owns the
+-- table and so bypasses its (deliberately empty) RLS policy set; a browser
+-- holding the anon key gets nothing from this table at all.
+select key, value from public.app_config where key = 'owner_uid';
+
+-- Smoke check on the function itself. **This returns `false` here, and that is
+-- correct** — the SQL editor is not a user session, so `auth.uid()` is null and
+-- the first conjunct fails. It proves the function exists and runs; it cannot
+-- prove the uid matches. The real test is the app: log in and load /listings.
+-- Rows appear = the pin is right. An empty table with no error = the uid in
+-- `app_config` is not the uid of the account you logged in with.
+select public.is_app_user();
+
+-- 3. if you locked yourself out -----------------------------------------------
+-- Nothing is lost — RLS hides rows, it does not delete them, and the SQL editor
+-- is not subject to it. Re-run section 1 with the right uid. To find it:
+--
+--   select id, email, last_sign_in_at from auth.users order by created_at;
+--
+-- To back all of 0011 out entirely, re-apply `0002_rls.sql`, `0007_photos.sql`
+-- and `0010_maps.sql` — each is re-runnable and each restores its own policies
+-- to the `auth.role() = 'authenticated'` form.
