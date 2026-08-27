@@ -11,13 +11,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InlineEdit, toNumberOrNull, toTextOrNull } from "@/components/inline-edit";
-import { SimpleSelect } from "@/components/simple-select";
 import { PersonDot } from "@/components/person-dot";
 import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
-import { FEE_OPTIONS } from "@/components/listings/options";
 import { PetsMark } from "@/components/listings/pets-mark";
 import { AmenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
@@ -27,14 +25,14 @@ import { useUnread, type ListingRow } from "@/lib/queries";
 import { defaultSortDir, type Sort, type SortKey } from "@/lib/listing-filters";
 import { money } from "@/lib/format";
 import { fmtDay } from "@/lib/time";
-import type { FeeType } from "@/lib/types";
 
 const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "address", label: "Address" },
   { key: "neighborhood", label: "Neighborhood" },
-  { key: "rent", label: "Rent", className: "text-right" },
+  // Rent gets a floor of its own: a number that wraps or ellipsises is the one
+  // thing in this table nobody can read around ("$5,2…" is not a rent).
+  { key: "rent", label: "Rent", className: "min-w-[5.5rem] text-right" },
   { key: "beds", label: "Bd / Ba" },
-  { key: "fee_type", label: "Fee" },
   { key: "pets", label: "Pets" },
   { key: "amenities", label: "Amenities" },
   { key: "status", label: "Status" },
@@ -130,7 +128,9 @@ function Row({
     <TableRow
       style={{ borderLeft: `3px solid ${row.added_by_person?.color ?? "#888"}` }}
     >
-      <TableCell className="max-w-56">
+      {/* Wider since the Fee column left — the address is what anyone
+          scans for, and the freed width goes to it and to Amenities. */}
+      <TableCell className="max-w-72">
         <span className="flex items-center gap-2">
           {/* Small enough to sit inside the row's line height, so adding
               photos never changes the table's rhythm. */}
@@ -167,25 +167,31 @@ function Row({
         />
       </TableCell>
 
-      <TableCell className="text-right tabular-nums">
+      {/* No width cap and no `truncate`: `InlineEdit` bakes both into its
+          button, so the overrides go through `className` (tailwind-merge drops
+          `truncate` when `text-clip` follows it). A rent renders whole or the
+          column gets wider — it never renders as "$5,2…". */}
+      <TableCell className="min-w-[5.5rem] text-right tabular-nums whitespace-nowrap">
         <InlineEdit
           label="rent"
           type="number"
           value={row.rent}
           display={row.rent == null ? undefined : money(row.rent)}
-          className="text-right"
+          className="w-auto max-w-none text-right text-clip whitespace-nowrap"
           inputClassName="text-right"
           onSave={(raw) => save({ rent: toNumberOrNull(raw) })}
         />
       </TableCell>
 
-      <TableCell className="whitespace-nowrap">
-        <span className="flex items-center gap-1">
+      {/* "3 / 3" as one unbreakable phrase — two fixed-width boxes with a
+          slash floating between them read as two separate facts. */}
+      <TableCell className="whitespace-nowrap tabular-nums">
+        <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
           <InlineEdit
             label="beds"
             type="number"
             value={row.beds}
-            className="w-10"
+            className="w-auto max-w-none text-clip whitespace-nowrap"
             inputClassName="w-14"
             onSave={(raw) => save({ beds: toNumberOrNull(raw) })}
           />
@@ -194,22 +200,11 @@ function Row({
             label="baths"
             type="number"
             value={row.baths}
-            className="w-10"
+            className="w-auto max-w-none text-clip whitespace-nowrap"
             inputClassName="w-14"
             onSave={(raw) => save({ baths: toNumberOrNull(raw) })}
           />
         </span>
-      </TableCell>
-
-      <TableCell>
-        <SimpleSelect<FeeType>
-          size="sm"
-          aria-label="Fee type"
-          className="w-28 border-transparent"
-          value={row.fee_type ?? "unknown"}
-          options={FEE_OPTIONS}
-          onValueChange={(fee_type) => save({ fee_type })}
-        />
       </TableCell>
 
       <TableCell>
@@ -218,7 +213,7 @@ function Row({
 
       {/* Four columns, one cell: laundry / dishwasher / AC / outdoor space,
           with the unanswered ones left out. Sorted by `amenityRank`. */}
-      <TableCell className="max-w-44">
+      <TableCell className="max-w-56">
         <AmenityMarks listing={row} className="text-xs" />
       </TableCell>
 

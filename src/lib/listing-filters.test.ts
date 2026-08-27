@@ -484,7 +484,6 @@ describe("defaultSortDir", () => {
       "neighborhood",
       "rent",
       "beds",
-      "fee_type",
       "status",
       "broker",
       "next_action_due",
@@ -611,18 +610,15 @@ describe("sortRows", () => {
     ]);
   });
 
-  it("sorts status and fee_type by their raw value", () => {
+  it("sorts status by its raw value", () => {
+    // `fee_type` used to be sorted here too. The Fee column left the table and
+    // took its sort key with it; the fee *filter* is untouched (see above).
     const rows = [
-      row({ id: "saved", status: "saved", fee_type: "op" }),
-      row({ id: "applied", status: "applied", fee_type: "fee" }),
-      row({ id: "null", status: null, fee_type: null }),
+      row({ id: "saved", status: "saved" }),
+      row({ id: "applied", status: "applied" }),
+      row({ id: "null", status: null }),
     ];
     expect(ids(sortRows(rows, { key: "status", dir: "asc" }))).toEqual([
-      "applied",
-      "saved",
-      "null",
-    ]);
-    expect(ids(sortRows(rows, { key: "fee_type", dir: "asc" }))).toEqual([
       "applied",
       "saved",
       "null",

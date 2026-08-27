@@ -68,7 +68,6 @@ export type SortKey =
   | "neighborhood"
   | "rent"
   | "beds"
-  | "fee_type"
   | "pets"
   | "amenities"
   | "status"
@@ -196,8 +195,6 @@ function sortValue(row: ListingRow, key: SortKey): string | number | null {
       return row.broker?.name?.toLowerCase() ?? null;
     case "neighborhood":
       return row.neighborhood?.toLowerCase() ?? null;
-    case "fee_type":
-      return row.fee_type ?? null;
     case "pets":
       // Ranked, not alphabetical: sorting "Pets" should walk from the ones you
       // can move into to the ones you cannot, and `cats_only < yes` as text

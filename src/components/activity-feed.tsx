@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PersonDot } from "@/components/person-dot";
 import { useActivity, type ActivityRow } from "@/lib/queries";
+import { activityHref } from "@/lib/activity";
 import { fmtNY } from "@/lib/time";
 
 type Group = { key: string; person: ActivityRow["person"]; items: ActivityRow[] };
@@ -65,28 +66,43 @@ export function ActivityFeed({ limit = 50 }: { limit?: number }) {
               className="text-sm font-extrabold"
             />
             <ul className="mt-1 grid gap-1">
-              {group.items.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm"
-                >
-                  <span className="min-w-0">
-                    {item.entity_type === "listing" && item.entity_id ? (
+              {group.items.map((item) => {
+                const href = activityHref(item);
+                const when = item.created_at
+                  ? fmtNY(item.created_at, "MMM d, h:mm a")
+                  : "";
+                const body = (
+                  <>
+                    <span className="min-w-0 underline-offset-4 group-hover:underline">
+                      {item.summary}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                      {when}
+                    </span>
+                  </>
+                );
+
+                // The whole row is the target, not the four words in the middle
+                // of it: on a phone the summary is one line of 13px text and
+                // the timestamp is smaller still.
+                const rowClass =
+                  "group flex min-h-11 flex-wrap items-baseline justify-between gap-x-3 text-sm md:min-h-0";
+
+                return (
+                  <li key={item.id}>
+                    {href ? (
                       <Link
-                        href={`/listings/${item.entity_id}`}
-                        className="underline-offset-4 hover:underline"
+                        href={href}
+                        className={`${rowClass} -mx-1.5 rounded-lg px-1.5 hover:bg-surface-hover md:mx-0 md:px-0 md:hover:bg-transparent`}
                       >
-                        {item.summary}
+                        {body}
                       </Link>
                     ) : (
-                      item.summary
+                      <span className={rowClass}>{body}</span>
                     )}
-                  </span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {item.created_at ? fmtNY(item.created_at, "MMM d, h:mm a") : ""}
-                  </span>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

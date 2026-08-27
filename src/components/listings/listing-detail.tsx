@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { ExternalLink } from "lucide-react";
@@ -93,6 +94,28 @@ function ListingDetailView({
   const save = useRowEdit(listing);
   const mergedInto = useListing(listing.merged_into ?? undefined);
   const unread = useUnread();
+
+  /**
+   * The browser cannot honour `#thread` itself: this view mounts only once the
+   * listing query resolves, long after the navigation, so the anchor does not
+   * exist at the moment Next would have scrolled to it. Scrolling here — on
+   * the first render that has a DOM node — is what makes the feed's "messaged
+   * about ..." link land on the conversation. Marking read is not our job:
+   * `Thread` does it on mount, which is exactly when this fires.
+   */
+  const threadRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (window.location.hash !== "#thread") return;
+    const el = threadRef.current;
+    if (!el) return;
+    // A frame late on purpose: the photo strip above settles its height first,
+    // and scrolling before it does lands short of the card.
+    const timer = setTimeout(
+      () => el.scrollIntoView({ behavior: "smooth", block: "start" }),
+      60,
+    );
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -407,9 +430,19 @@ function ListingDetailView({
 
       <InteractionsCard listing={listing} />
 
-      <Card>
+      {/* `#thread` is a real destination: the activity feed's "messaged
+          about ..." lines, the home strip and anything anyone pastes into the
+          chat all point here. `scroll-mt` keeps the heading clear of the
+          sticky top bar. */}
+      <Card id="thread" ref={threadRef} className="scroll-mt-20">
         <CardHeader>
-          <CardTitle>Thread</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            Thread
+            {/* Clears within a second of arriving — `Thread` marks itself read
+                on mount — but arriving from a link should still say what you
+                came for. */}
+            <UnreadBadge count={unread.byListing[listing.id] ?? 0} />
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {/* Bounded: the page keeps scrolling, the thread scrolls inside. */}

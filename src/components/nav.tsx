@@ -10,6 +10,7 @@ import { usePerson } from "@/lib/person";
 import { useQueue } from "@/components/queue/use-queue";
 import { needsAttentionCount } from "@/lib/queue";
 import { useUnread } from "@/lib/queries";
+import { unreadSummary } from "@/lib/unread";
 import { UnreadBadge } from "@/components/unread-badge";
 
 const TABS = [
@@ -36,6 +37,11 @@ function DueBadge({ count, className }: { count: number; className?: string }) {
       {count > 99 ? "99+" : count}
     </span>
   );
+}
+
+/** The Listings tab counts listings, so it cannot borrow the default wording. */
+function listingsBadgeLabel(count: number) {
+  return `${count} listing${count === 1 ? "" : "s"} with unread messages`;
 }
 
 function LogoutButton({ className }: { className?: string }) {
@@ -79,8 +85,13 @@ export function Nav() {
   // extra request beyond the one the home screen already makes.
   const { buckets } = useQueue();
   const due = needsAttentionCount(buckets);
-  // Only the global thread: per-listing unreads live next to their listing.
-  const unreadChat = useUnread().global;
+  // Two different questions off one RPC (`useUnread` is keyed by person, so
+  // switching who you are on this device reloads both): the Chat tab counts
+  // *messages* waiting in the group thread, the Listings tab counts *listings*
+  // with something new. Counting messages on Listings would put a number in
+  // the tens on a tab whose job is "which rows should I open".
+  const { chatCount, listingIds } = unreadSummary(useUnread());
+  const unreadListings = listingIds.length;
 
   return (
     <>
@@ -102,7 +113,10 @@ export function Nav() {
             >
               {label}
               {href === "/" && due > 0 && <DueBadge count={due} />}
-              {href === "/chat" && <UnreadBadge count={unreadChat} />}
+              {href === "/listings" && (
+                <UnreadBadge count={unreadListings} label={listingsBadgeLabel(unreadListings)} />
+              )}
+              {href === "/chat" && <UnreadBadge count={chatCount} />}
             </Link>
           ))}
           <div className="ml-auto flex items-center gap-2">
@@ -138,9 +152,16 @@ export function Nav() {
                 {href === "/" && due > 0 && (
                   <DueBadge count={due} className="absolute -top-1.5 -right-2.5" />
                 )}
+                {href === "/listings" && (
+                  <UnreadBadge
+                    count={unreadListings}
+                    label={listingsBadgeLabel(unreadListings)}
+                    className="absolute -top-1.5 -right-2.5"
+                  />
+                )}
                 {href === "/chat" && (
                   <UnreadBadge
-                    count={unreadChat}
+                    count={chatCount}
                     className="absolute -top-1.5 -right-2.5"
                   />
                 )}

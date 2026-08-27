@@ -8,9 +8,15 @@ import { cn } from "@/lib/utils";
 export function UnreadBadge({
   count,
   className,
+  label,
 }: {
   count: number;
   className?: string;
+  /**
+   * Overrides the screen-reader text. The nav's Listings tab counts listings,
+   * not messages, and "2 unread messages" would be a lie on that one.
+   */
+  label?: string;
 }) {
   if (count <= 0) return null;
   return (
@@ -19,7 +25,7 @@ export function UnreadBadge({
         "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-black tabular-nums text-primary-foreground",
         className,
       )}
-      aria-label={`${count} unread message${count === 1 ? "" : "s"}`}
+      aria-label={label ?? `${count} unread message${count === 1 ? "" : "s"}`}
     >
       {count > 99 ? "99+" : count}
     </span>

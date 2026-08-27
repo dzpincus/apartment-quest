@@ -464,6 +464,15 @@ important on `bg-inset`.
   dishwasher, packed lexicographically so a dishwasher can never outvote an
   in-unit washer); the cards show them as chips; `unknown` prints nothing at
   all rather than four em dashes.
+- **The table's columns are a budget.** There is no **Fee** column: `fee_type`
+  is edited on the detail page and filtered from the toolbar, and its sort key
+  is gone with the column (nothing else offered it). The width went to Address
+  and Amenities. **Rent never truncates** — the cell is `min-w-[5.5rem]
+  whitespace-nowrap tabular-nums` and the `InlineEdit` inside it overrides the
+  `w-full max-w-full truncate` baked into that component's button
+  (`text-clip` is what makes tailwind-merge drop `truncate`), because "$5,2…"
+  is not a rent. Bd / Ba is one nowrap phrase, "3 / 3", not two fixed-width
+  boxes with a slash floating between them.
 - **Qualification math**: `required = rent * income_multiplier` — NYC 40x means
   combined *annual* income >= 40x *monthly* rent. `SPEC.md` writes
   `rent * 12 * income_multiplier`, which applies the 40x twice; the convention it
@@ -537,6 +546,28 @@ important on `bg-inset`.
   (only `["unread"]`), which is what keeps an open thread out of a refetch loop.
   `postMessage` marks the thread read for the author. Badges come from the
   `unread_counts` RPC through `useUnread()`, keyed by person.
+- **Unread is two questions, one RPC.** `unreadSummary(unread)`
+  (`src/lib/unread.ts`, pure and tested) turns the summary into
+  `{ chatCount, listingIds }`, and everything that badges anything reads it:
+  the Chat tab counts *messages* in the group thread, the Listings tab counts
+  *listings* with something new (counting messages there would put a number in
+  the tens on a tab whose job is "which rows should I open"), the listings
+  table and cards badge their own row, and Home's `UnreadStrip` — an inset pill
+  above the queue chips, hidden at zero — links `/chat` and either `/listings`
+  or, for a single listing, straight to `/listings/<id>#thread`. Unread badges
+  are the primary tint (`UnreadBadge`); the red one in the nav is `DueBadge`
+  and means a deadline, not a conversation. `#thread` is a real destination:
+  the detail page's thread Card carries `id="thread"` and scrolls itself there
+  on mount, because the anchor does not exist yet when Next would have scrolled
+  — arriving marks it read, since `Thread` does that on mount. A `messages`
+  insert invalidates `["unread"]` (see `keysForChange`), which is a prefix of
+  `["unread", personId]`, so somebody else posting lights the badge live.
+- **Activity rows link where they point.** `activityHref(item)`
+  (`src/lib/activity.ts`, pure and tested) is the only place that decides:
+  a listing entity -> that listing, `messaged` about a listing -> its
+  `#thread`, a global `messaged` (filed under `entity_type: "message"`) ->
+  `/chat`, `added_broker` -> `/brokers`, anything else -> `null` and the row
+  stays text. The whole row is the target, 44px tall under `md`.
 - **Votes ride on the listing row.** `LISTING_SELECT` embeds
   `votes(person_id, vote, comment, updated_at)`, so the table chips, the mobile
   cards and the detail widget all read votes from a query that already runs —
