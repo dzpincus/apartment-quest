@@ -41,6 +41,7 @@ Server-only vars (never `NEXT_PUBLIC_`, never read from a client component):
 | `SUPABASE_SERVICE_ROLE_KEY` | Photos and sync. Read only by `src/lib/supabase/admin.ts` (which imports `server-only`). Missing -> `/api/photos` returns 500 and `/api/sync` returns 503 `{disabled:true}`; nothing else breaks. |
 | `CRON_SECRET` | Listing status sync. The bearer token pg_cron sends to `/api/sync`, compared in constant time. Missing -> every cron call is a 401; "Check now" still works, since that path uses the session. Also accepted by `/api/geocode` and `/api/commutes` (`src/lib/api-auth.ts`). |
 | `GOOGLE_MAPS_API_KEY` | Commute times. Google Routes API only, server-only. Missing -> `/api/commutes` returns 503 `{disabled:true}`, the commute cards show "—" and nothing else breaks. The map itself needs no key. |
+| `AQ_ROUTES_LIVE` | Optional escape hatch. Outside production (`VERCEL_ENV !== "production"`) `computeRoute` does **not** call Google unless this is `1`: it logs `[routes] DRY-RUN` and returns `{ok:false, error:"dry-run (non-production)"}`. Previews and dev share the one key and the one free tier, and one preview branch backfilling 60 listings × 5 places is 900 calls nobody meant to buy. Dry-run rows carry the one-hour error TTL, so a preview cannot pin a month of em dashes onto rows production reads. |
 
 Missing env does not break `pnpm build` — Supabase clients only throw when
 constructed at runtime, and the import route reads its key inside the request.
@@ -428,9 +429,34 @@ would delete the very rows the function had just carried across.
 **Commute times are a cache with a cost guard.** `POST /api/commutes`
 `{ listingId?, locationId?, force? }` fills in the *missing* squares of
 (geocoded, live, still-in-play listings) × (saved locations) × (walk, bike,
-transit), four at a time, 8s per call, and never recomputes a row younger than
-30 days unless `force` says so. Sixty listings and five locations is ~900 rows
-**in total**, not per month. `departureTime` for TRANSIT is the next weekday
+transit), four at a time, 8s per call. Sixty listings and five locations is
+~900 rows **in total**, not per month.
+
+**Freshness is `isFresh(row, now)`** (`src/lib/geo-types.ts`, pure and tested),
+and it has two clocks: a real answer is trusted for 30 days
+(`COMMUTE_MAX_AGE_MS`), a row with an `error` for one hour
+(`ERROR_MAX_AGE_MS`). A failure is not an answer — 403s are billing, 429s pass,
+timeouts pass, and a dry-run row is not a fact about New York at all — so
+trusting one for a month pins an em dash to a card long after the cause is
+gone, clearable only by a human pressing Refresh on every listing.
+
+**The freshness read is the cost guard, so it fails closed.** It is scoped to
+*both* axes (`listing_id` **and** `location_id` — a one-location run has no
+business dragging back every location's rows), bounded with an explicit
+`range`, and asked for with `{ count: "exact" }`. If the count exceeds the rows
+that came back, PostgREST truncated us: the run logs `freshness read truncated
+— refusing to spend` and 500s, because rows past the cap look uncached and
+"uncached" here means "buy it again".
+
+**`force` needs a target.** `{ force: true }` with no `listingId` or
+`locationId` is a 400 ("Forcing needs a listing or a location."). Unscoped it
+means "re-buy the whole grid", and the only button that sends it — the detail
+card's "Refresh times" — always names a listing.
+
+**Rows are written as they are earned**, not in one upsert at the end: the pool
+flushes every 50 and the whole thing sits in `try/catch/finally` that flushes
+again whatever happened. Google has been paid by the time a row exists, so
+losing 249 of them to a throw is money spent twice. `departureTime` for TRANSIT is the next weekday
 09:00 in New York (`nextWeekdayNineAmNY`, tested against both DST halves and
 every day of the week) — a fixed rush hour, so two listings looked at on
 different days are still comparable, and always in the future, which Google
@@ -472,10 +498,20 @@ answers is flagged low-confidence by definition — rung one is the one that
 actually knows New York.
 
 **Attribution is not optional.** MapLibre's attribution control stays visible on
-every map (OpenFreeMap + © OpenStreetMap contributors). Google's terms allow
-Routes results to be shown *without* a Google map only with a "Powered by
-Google" credit, so that line sits under the commute table. Neither is
-decoration; removing either is a licence violation.
+every map (OpenFreeMap + © OpenStreetMap contributors — or © OpenStreetMap
+contributors © CARTO when the style fetch fails and `loadMapStyle` falls back
+to CARTO's keyless dark raster tiles). Google's terms allow Routes results to be
+shown *without* a Google map only with a "Powered by Google" credit, so
+`PoweredByGoogle` (`src/components/listings/powered-by-google.tsx`) is one
+component rendered in all three places a `commute_times` number reaches a
+screen: under the detail card's table, under the listings table and under the
+mobile cards whenever the "Transit to ⭐" column is on. Neither is decoration;
+removing either is a licence violation.
+
+**No pin, no commute table.** Every cell in it is a Google Maps deep link built
+from the listing's coordinates, and with none they are built from `0,0` — a
+spot in the Gulf of Guinea. An unplaced listing gets the "Locate" block and
+nothing else.
 
 **Which places a person sees is a device preference, not data.** `locations` is
 shared — one hunt, one list — and `src/lib/prefs.ts` keeps the toggles and the
@@ -483,6 +519,12 @@ starred place in localStorage (`aq.locations.hidden:<personId>`,
 `aq.locations.primary:<personId>`) behind the same `useSyncExternalStore`
 pattern `person.tsx` uses. Snapshots are cached against the exact stored string,
 because a fresh `Set` per read is an infinite render loop.
+
+localStorage outlives the row it names, so `usePrimaryLocationId(personId,
+knownIds?)` takes the loaded list and returns null when the starred id is not in
+it. Anybody can delete a saved place; without the check the other three devices
+keep a "Transit to ⭐" column that can never be filled and a sort key that reads
+every listing as null.
 
 **The subway is a file, not an API.** `public/data/subway-stations.geojson` is
 the MTA's own export trimmed to `{ name, lines }` per station *complex* (Times

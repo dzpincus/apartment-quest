@@ -6,7 +6,7 @@ import { ListingsToolbar } from "@/components/listings/listings-toolbar";
 import { ListingsTable } from "@/components/listings/listings-table";
 import { ListingCards } from "@/components/listings/listing-cards";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useListings } from "@/lib/queries";
+import { useListings, useLocations } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
 import { humans } from "@/lib/people";
 import { useListingsView, usePrimaryLocationId } from "@/lib/prefs";
@@ -33,9 +33,12 @@ const MapPanel = dynamic(() => import("@/components/map/map-panel").then((m) => 
 export default function ListingsPage() {
   const { person, people } = usePerson();
   const { data: listings = [], isPending, error } = useListings();
+  const { data: locations } = useLocations();
   const [view, setView] = useListingsView();
   // The starred place is a device preference; only the transit column reads it.
-  const primaryLocationId = usePrimaryLocationId(person?.id);
+  // Checked against the loaded list, so a place somebody else deleted cannot
+  // leave this page sorting by a column of em dashes.
+  const primaryLocationId = usePrimaryLocationId(person?.id, locations);
 
   // Filters are ephemeral view state — no need to survive a reload.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);

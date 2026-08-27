@@ -11,7 +11,8 @@ import { PetsMark } from "@/components/listings/pets-mark";
 import { AmenityMarks, amenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
 import { GoneBadge } from "@/components/listings/gone-badge";
-import { useUnread, type ListingRow } from "@/lib/queries";
+import { PoweredByGoogle } from "@/components/listings/powered-by-google";
+import { useLocations, useUnread, type ListingRow } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
 import { usePrimaryLocationId } from "@/lib/prefs";
 import { transitSeconds } from "@/lib/listing-filters";
@@ -34,8 +35,9 @@ export function ListingCards({
 }) {
   const unread = useUnread();
   const { person } = usePerson();
-  // Only drawn when this device starred a place — see `prefs.ts`.
-  const primaryId = usePrimaryLocationId(person?.id);
+  const { data: locations } = useLocations();
+  // Only drawn when this device starred a place that still exists — `prefs.ts`.
+  const primaryId = usePrimaryLocationId(person?.id, locations);
 
   return (
     <div className="grid gap-3">
@@ -122,6 +124,10 @@ export function ListingCards({
           </div>
         );
       })}
+      {/* The ⭐ chips above are Routes results shown away from a Google map,
+          which Google's terms allow only with this credit. It comes and goes
+          with the starred place, exactly like the chips do. */}
+      {primaryId && <PoweredByGoogle className="text-center" />}
     </div>
   );
 }

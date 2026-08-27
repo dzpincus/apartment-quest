@@ -18,6 +18,16 @@ import "server-only";
 import { timingSafeEqual } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 
+/**
+ * A v4-shaped uuid, the only thing any of these routes will accept as an id.
+ *
+ * Hoisted here because all four API routes had their own copy of the same
+ * literal: PostgREST answers a malformed uuid with a 400 and a driver message,
+ * which is a stack trace shown to a person, so every route checks first — and
+ * four identical regexes are four chances for one of them to drift.
+ */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** The bearer token on a request, if it carries one. */
 export function bearerToken(request: Request): string | null {
   const header = request.headers.get("authorization") ?? "";

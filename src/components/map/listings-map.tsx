@@ -19,7 +19,7 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LngLatBounds, Map as MapLibreMap, Marker, type MapOptions } from "maplibre-gl";
-import { loadMapStyle } from "@/components/map/map-style";
+import { loadMapStyle, MAP_STYLE_FAILED_MESSAGE } from "@/components/map/map-style";
 import {
   applyListingPinState,
   ensureMapCss,
@@ -338,7 +338,7 @@ export function ListingsMap({
 
       {failed && (
         <p className="absolute inset-x-4 top-1/2 z-10 -translate-y-1/2 rounded-2xl bg-card/95 p-4 text-center text-sm text-muted-foreground">
-          The map tiles wouldn&apos;t load. The list still works.
+          {MAP_STYLE_FAILED_MESSAGE} The list still works.
         </p>
       )}
       {!ready && !failed && (

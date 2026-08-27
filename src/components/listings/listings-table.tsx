@@ -16,12 +16,13 @@ import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VoteChips } from "@/components/listings/vote-chips";
+import { PoweredByGoogle } from "@/components/listings/powered-by-google";
 import { PetsMark } from "@/components/listings/pets-mark";
 import { AmenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { useRowEdit } from "@/components/listings/use-row-edit";
-import { useUnread, type ListingRow } from "@/lib/queries";
+import { useLocations, useUnread, type ListingRow } from "@/lib/queries";
 import {
   defaultSortDir,
   transitSeconds,
@@ -81,7 +82,9 @@ export function ListingsTable({
 }) {
   const unread = useUnread();
   const { person } = usePerson();
-  const primaryId = usePrimaryLocationId(person?.id);
+  const { data: locations } = useLocations();
+  // The column exists only while the starred place does — see `prefs.ts`.
+  const primaryId = usePrimaryLocationId(person?.id, locations);
 
   function toggle(key: SortKey) {
     onSortChange(
@@ -92,52 +95,58 @@ export function ListingsTable({
   }
 
   return (
-    <Table className="text-sm">
-      <TableHeader>
-        <TableRow>
-          {columns(Boolean(primaryId)).map((col) => (
-            <TableHead
-              key={col.key}
-              className={col.className}
-              aria-sort={
-                sort.key === col.key
-                  ? sort.dir === "asc"
-                    ? "ascending"
-                    : "descending"
-                  : "none"
-              }
-            >
-              <button
-                type="button"
-                onClick={() => toggle(col.key)}
-                className="inline-flex items-center gap-1 hover:text-foreground"
+    <>
+      <Table className="text-sm">
+        <TableHeader>
+          <TableRow>
+            {columns(Boolean(primaryId)).map((col) => (
+              <TableHead
+                key={col.key}
+                className={col.className}
+                aria-sort={
+                  sort.key === col.key
+                    ? sort.dir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
               >
-                {col.label}
-                {sort.key === col.key &&
-                  (sort.dir === "asc" ? (
-                    <ArrowUp className="size-3" />
-                  ) : (
-                    <ArrowDown className="size-3" />
-                  ))}
-              </button>
-            </TableHead>
+                <button
+                  type="button"
+                  onClick={() => toggle(col.key)}
+                  className="inline-flex items-center gap-1 hover:text-foreground"
+                >
+                  {col.label}
+                  {sort.key === col.key &&
+                    (sort.dir === "asc" ? (
+                      <ArrowUp className="size-3" />
+                    ) : (
+                      <ArrowDown className="size-3" />
+                    ))}
+                </button>
+              </TableHead>
+            ))}
+            <TableHead>Qualify</TableHead>
+            <TableHead className="text-right">By</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <Row
+              key={row.id}
+              row={row}
+              incomes={incomes}
+              unread={unread.byListing[row.id] ?? 0}
+              primaryLocationId={primaryId}
+            />
           ))}
-          <TableHead>Qualify</TableHead>
-          <TableHead className="text-right">By</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <Row
-            key={row.id}
-            row={row}
-            incomes={incomes}
-            unread={unread.byListing[row.id] ?? 0}
-            primaryLocationId={primaryId}
-          />
-        ))}
-      </TableBody>
-    </Table>
+        </TableBody>
+      </Table>
+      {/* Google's terms require this credit wherever Routes results are
+          shown away from a Google map — and the Transit column is exactly
+          that. It appears with the column and disappears with it. */}
+      {primaryId && <PoweredByGoogle className="mt-1 text-right" />}
+    </>
   );
 }
 

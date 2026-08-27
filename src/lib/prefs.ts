@@ -143,12 +143,35 @@ export function useHiddenLocationIds(personId: Uuid | undefined): ReadonlySet<Uu
   return useSyncExternalStore(subscribe, getSnapshot, () => EMPTY);
 }
 
-/** The starred place, live. Null until a person picks one. */
-export function usePrimaryLocationId(personId: Uuid | undefined): Uuid | null {
-  const getSnapshot = useCallback(
-    () => (personId ? primaryLocationId(personId) : null),
-    [personId],
-  );
+/** Either shape a caller already has to hand: the rows, or just their ids. */
+export type KnownLocations = readonly Uuid[] | readonly { id: Uuid }[];
+
+const idOf = (item: Uuid | { id: Uuid }): Uuid => (typeof item === "string" ? item : item.id);
+
+/**
+ * The starred place, live. Null until a person picks one.
+ *
+ * `knownIds` is the loaded list, and passing it is what keeps a stale
+ * preference from becoming a broken column. localStorage outlives the row it
+ * names: anybody can delete a saved place — one hunt, one list — and the three
+ * other devices carry on starring an id that no longer exists. The table then
+ * grows a "Transit to ⭐" column of em dashes it can never fill, the sort key
+ * reads every listing as null, and the mobile cards hide a chip for a place
+ * with no name. Omit the argument and the raw stored value comes back, which
+ * is right for a caller that has not loaded the list yet.
+ */
+export function usePrimaryLocationId(
+  personId: Uuid | undefined,
+  knownIds?: KnownLocations,
+): Uuid | null {
+  const getSnapshot = useCallback(() => {
+    if (!personId) return null;
+    const starred = primaryLocationId(personId);
+    if (starred === null || knownIds === undefined) return starred;
+    return knownIds.some((item) => idOf(item) === starred) ? starred : null;
+  }, [personId, knownIds]);
+  // The snapshot is a string or null — a primitive, so an unstable `knownIds`
+  // identity costs a comparison and never an extra render.
   return useSyncExternalStore(subscribe, getSnapshot, () => null);
 }
 

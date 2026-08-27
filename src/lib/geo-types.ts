@@ -66,6 +66,39 @@ export function emptyCommutes(): CommutesResponse {
 /** How long a cached answer is trusted before it is worth asking again. */
 export const COMMUTE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * How long a cached *failure* is trusted. An hour, not a month.
+ *
+ * A row with an `error` is not an answer — it is a note saying we could not
+ * get one, and the reasons are almost all transient or fixable from outside
+ * the app: a key restriction somebody corrects in the Google console, a
+ * billing account switched on, a timeout, a 429, or a preview deployment's
+ * dry-run. Trusting those for thirty days pins an em dash to the card long
+ * after the cause has gone, and the only way back is a human pressing Refresh
+ * on every listing. An hour is short enough that the fix shows up by itself
+ * and long enough that a genuinely unroutable pair (no ferry, no bridge) is
+ * not re-asked 900 times an afternoon.
+ */
+export const ERROR_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Is a cached row young enough to keep, or is it worth spending a Google call
+ * on again? The whole freshness decision of `/api/commutes`, extracted so it
+ * can be tested without a database — a mistake here is money.
+ *
+ * A row with no parseable `computed_at` is *not* fresh (it was never really
+ * computed). A stamp in the future is treated as fresh: a clock disagreement
+ * is not a reason to spend, and this route errs towards not spending.
+ */
+export function isFresh(
+  row: { computed_at?: string | null; error?: string | null },
+  now: number,
+): boolean {
+  const at = row.computed_at ? Date.parse(row.computed_at) : Number.NaN;
+  if (!Number.isFinite(at)) return false;
+  return now - at < (row.error ? ERROR_MAX_AGE_MS : COMMUTE_MAX_AGE_MS);
+}
+
 /** Labels and glyphs for the three modes, in the order the card shows them. */
 export const COMMUTE_MODE_LABELS: Record<CommuteMode, string> = {
   walk: "Walk",

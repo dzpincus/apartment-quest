@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  computeRoute,
   GOOGLE_TRAVEL_MODE,
   nextWeekdayNineAmNY,
   parseDurationSeconds,
   routeErrorMessage,
+  routesLive,
 } from "./routes";
 
 /**
@@ -131,5 +133,68 @@ describe("GOOGLE_TRAVEL_MODE", () => {
       bike: "BICYCLE",
       transit: "TRANSIT",
     });
+  });
+});
+
+/**
+ * Staging safety. Every environment shares one Google key and one 10k/month
+ * free tier, so "is this production" is a spending decision, not a config
+ * detail — and the default for an environment nobody recognises is *no*.
+ */
+describe("routesLive", () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+    vi.restoreAllMocks();
+  });
+
+  it("is live in production, always", () => {
+    process.env.VERCEL_ENV = "production";
+    delete process.env.AQ_ROUTES_LIVE;
+    expect(routesLive()).toBe(true);
+  });
+
+  it("is a dry run on a preview branch and on a dev machine", () => {
+    process.env.VERCEL_ENV = "preview";
+    delete process.env.AQ_ROUTES_LIVE;
+    expect(routesLive()).toBe(false);
+
+    delete process.env.VERCEL_ENV;
+    expect(routesLive()).toBe(false);
+  });
+
+  it("opens the door only for an explicit AQ_ROUTES_LIVE=1", () => {
+    delete process.env.VERCEL_ENV;
+    process.env.AQ_ROUTES_LIVE = "1";
+    expect(routesLive()).toBe(true);
+    // Not "true", not "yes" — one value, so a half-remembered one is a dry run.
+    process.env.AQ_ROUTES_LIVE = "true";
+    expect(routesLive()).toBe(false);
+  });
+});
+
+describe("computeRoute in a dry run", () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+    vi.restoreAllMocks();
+  });
+
+  it("spends nothing and returns an ordinary failed outcome", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-key";
+    delete process.env.VERCEL_ENV;
+    delete process.env.AQ_ROUTES_LIVE;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const outcome = await computeRoute({
+      origin: { lat: 40.7173, lng: -73.95687 },
+      destination: { lat: 40.73507, lng: -73.99042 },
+      mode: "transit",
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ ok: false, error: "dry-run (non-production)" });
+    expect(info).toHaveBeenCalled();
   });
 });

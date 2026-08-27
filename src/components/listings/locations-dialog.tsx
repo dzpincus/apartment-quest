@@ -17,7 +17,7 @@
  * wrong commute times.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, EyeOff, MapPin, Plus, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,7 +79,9 @@ function LocationsDialogBody() {
   const { person, people } = usePerson();
   const { data: locations = [] } = useLocations();
   const hidden = useHiddenLocationIds(person?.id);
-  const primaryId = usePrimaryLocationId(person?.id);
+  // The loaded list is the authority: a star pointing at a place somebody else
+  // deleted must not light up a row that no longer exists.
+  const primaryId = usePrimaryLocationId(person?.id, locations);
 
   return (
     <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
@@ -128,6 +130,21 @@ function LocationRow({
   const { person } = usePerson();
   const { deleteLocation } = useMutations(person?.id);
   const [confirming, setConfirming] = useState(false);
+
+  /**
+   * "Sure?" stands down after four seconds.
+   *
+   * A row armed by a mis-tap used to stay armed for as long as the dialog was
+   * open, so the *next* deliberate tap in that row — aimed at the eye or the
+   * star, which sit right beside it — could land on a live delete button.
+   * These rows are shared data with no undo and no per-person boundary, so the
+   * dangerous state is the one that should expire on its own.
+   */
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 4_000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
 
   return (
     <li className="flex items-center gap-2 rounded-2xl bg-inset p-2">

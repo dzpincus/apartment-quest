@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { createClient } from "@/lib/supabase/server";
+import { UUID_RE } from "@/lib/api-auth";
 import { createAdminClient, MissingServiceRoleKeyError } from "@/lib/supabase/admin";
 import { listingLabel } from "@/lib/format";
 import { assertSafeUrl, BROWSER_HEADERS, UnsafeUrlError } from "@/lib/import/fetch-page";
@@ -70,8 +71,6 @@ const HEIC_MESSAGE = "Export as JPEG first";
 const TOO_BIG_MESSAGE = "That photo is bigger than 8MB.";
 const HUGE_MESSAGE = "That image is too large to process.";
 const UNREADABLE_MESSAGE = "Couldn't read that image.";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Why one image did not make it. `kind` picks the status when *all* of them

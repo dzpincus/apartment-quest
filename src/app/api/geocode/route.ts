@@ -21,7 +21,7 @@ import "server-only";
  */
 
 import { NextResponse } from "next/server";
-import { authorized } from "@/lib/api-auth";
+import { authorized, UUID_RE } from "@/lib/api-auth";
 import { adminEnabled, createAdminClient } from "@/lib/supabase/admin";
 import {
   geocodeAddress,
@@ -36,7 +36,6 @@ export const runtime = "nodejs";
 /** Two providers at six seconds each, plus the Nominatim politeness gap. */
 export const maxDuration = 30;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Longer than any real street address, and shorter than an attack. */
 const MAX_ADDRESS = 300;
 

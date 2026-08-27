@@ -17,7 +17,7 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { Map as MapLibreMap, Marker, type MapOptions } from "maplibre-gl";
-import { loadMapStyle } from "@/components/map/map-style";
+import { loadMapStyle, MAP_STYLE_FAILED_MESSAGE } from "@/components/map/map-style";
 import { ensureMapCss, listingPinElement, locationPinElement } from "@/components/map/pin";
 import { cn } from "@/lib/utils";
 import type { Location, Uuid } from "@/lib/types";
@@ -62,6 +62,10 @@ export function MiniMap({
   // The style is fetched, so the map exists a tick after mount: the marker
   // effects below wait for it rather than silently doing nothing.
   const [ready, setReady] = useState(false);
+  // `loadMapStyle` falls back to CARTO rather than rejecting, so reaching this
+  // means even the lifeboat sank. The listings map has said so all along; a
+  // silent grey rectangle on the detail card looked like a bug in the pin.
+  const [failed, setFailed] = useState(false);
 
   // The map is built once per (movable) mode: `interactive` is a constructor
   // option, so flipping "Move pin" genuinely is a new map.
@@ -87,8 +91,9 @@ export function MiniMap({
           if (!cancelled) setReady(true);
         });
       })
-      .catch(() => {
-        /* The card below still works; a missing basemap is not an error state. */
+      .catch((error) => {
+        console.warn("[map] mini map failed to start", error);
+        if (!cancelled) setFailed(true);
       });
 
     return () => {
@@ -99,6 +104,7 @@ export function MiniMap({
       mapRef.current?.remove();
       mapRef.current = null;
       setReady(false);
+      setFailed(false);
     };
     // Coordinates are handled by the effect below — re-creating the map when a
     // drag lands would throw the tiles away mid-gesture.
@@ -147,16 +153,23 @@ export function MiniMap({
   }, [locations, primaryLocationId, ready]);
 
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "aq-map h-[200px] w-full overflow-hidden rounded-2xl border-2 border-border bg-[#1a1836]",
-        className,
+    <div className="relative">
+      <div
+        ref={containerRef}
+        className={cn(
+          "aq-map h-[200px] w-full overflow-hidden rounded-2xl border-2 border-border bg-[#1a1836]",
+          className,
+        )}
+        // A frozen map is a picture; a movable one is a control surface, and
+        // calling it an image would hide the draggable pin from a screen reader.
+        role={movable ? "region" : "img"}
+        aria-label={movable ? `${ariaLabel} — drag the pin to correct it` : ariaLabel}
+      />
+      {failed && (
+        <p className="absolute inset-x-4 top-1/2 z-10 -translate-y-1/2 rounded-2xl bg-card/95 p-3 text-center text-sm text-muted-foreground">
+          {MAP_STYLE_FAILED_MESSAGE}
+        </p>
       )}
-      // A frozen map is a picture; a movable one is a control surface, and
-      // calling it an image would hide the draggable pin from a screen reader.
-      role={movable ? "region" : "img"}
-      aria-label={movable ? `${ariaLabel} — drag the pin to correct it` : ariaLabel}
-    />
+    </div>
   );
 }

@@ -4,7 +4,10 @@ import {
   duskCandy,
   duskCandyColor,
   lightness,
+  cartoDarkStyle,
   loadMapStyle,
+  CARTO_ATTRIBUTION,
+  CARTO_DARK_TILE_URL,
   parseColor,
   resetMapStyleCache,
   type MapStyle,
@@ -166,18 +169,38 @@ describe("loadMapStyle", () => {
     resetMapStyleCache();
   });
 
-  it("drops the cache on failure so the next map retries", async () => {
+  it("falls back to CARTO raster rather than rejecting, and drops the cache", async () => {
     resetMapStyleCache();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(new Response("nope", { status: 500 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(style())));
-    await expect(
-      loadMapStyle(fetchImpl as unknown as typeof fetch, "https://x/style"),
-    ).rejects.toThrow(/500/);
+
+    // A map, not a rejection: OpenFreeMap being down must not cost the pins.
+    const lifeboat = await loadMapStyle(fetchImpl as unknown as typeof fetch, "https://x/style");
+    expect(lifeboat.layers.map((l) => l.type)).toContain("raster");
+    expect(JSON.stringify(lifeboat.sources)).toContain(CARTO_DARK_TILE_URL);
+    expect(JSON.stringify(lifeboat.sources)).toContain(CARTO_ATTRIBUTION);
+
+    // …and the next map still asks OpenFreeMap rather than inheriting it.
     const retried = await loadMapStyle(fetchImpl as unknown as typeof fetch, "https://x/style");
     expect(retried.version).toBe(8);
+    expect(retried.layers[0].paint!["background-color"]).toBe(DUSK.background);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
     resetMapStyleCache();
+  });
+});
+
+describe("cartoDarkStyle", () => {
+  it("is a fresh object each call — MapLibre mutates the style it is given", () => {
+    expect(cartoDarkStyle()).not.toBe(cartoDarkStyle());
+    expect(cartoDarkStyle()).toEqual(cartoDarkStyle());
+  });
+
+  it("carries its attribution, which is a licence term and not decoration", () => {
+    const source = cartoDarkStyle().sources.carto as { attribution: string };
+    expect(source.attribution).toBe("© OpenStreetMap contributors © CARTO");
   });
 });

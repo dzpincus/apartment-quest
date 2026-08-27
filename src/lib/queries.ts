@@ -48,14 +48,14 @@ export type PhotoRef = Pick<
 
 /**
  * A cached commute as it arrives embedded in a listing (0010). `listing_id` is
- * left off — it is the row you found it on — and `computed_at` is not selected:
- * nothing on screen shows it, the 30-day guard is enforced server-side by
- * `/api/commutes`, and this array rides along on every listing read.
+ * left off — it is the row you found it on — and neither `computed_at` nor
+ * `meters` is selected: nothing on screen shows either (the card prints
+ * minutes, and distance in metres is not a thing anybody asked about), the
+ * freshness guard is enforced server-side by `/api/commutes`, and this array
+ * rides along on every listing read. `commute_times` still *stores* both —
+ * the column is dropped from the read, not from the table.
  */
-export type CommuteRef = Pick<
-  CommuteTime,
-  "location_id" | "mode" | "seconds" | "meters" | "error"
->;
+export type CommuteRef = Pick<CommuteTime, "location_id" | "mode" | "seconds" | "error">;
 
 /** Broker/person columns joined onto a listing row, plus everyone's votes. */
 export type ListingRow = Listing & {
@@ -115,7 +115,7 @@ const LISTING_SELECT = `
   next_action_owner_person:people!next_action_owner(id, name, color),
   votes(person_id, vote, comment, updated_at),
   photos:listing_photos(id, storage_path, thumb_path, width, height, sort),
-  commute_times(location_id, mode, seconds, meters, error)
+  commute_times(location_id, mode, seconds, error)
 `;
 
 /**

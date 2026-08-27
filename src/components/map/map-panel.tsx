@@ -34,12 +34,20 @@ import { bedsBaths, listingLabel, money } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Uuid } from "@/lib/types";
 
+/**
+ * How many times "Locate all" may go back to `/api/commutes` for the rest of
+ * the grid. Five passes is 1,500 pairs — more than this hunt will ever have —
+ * and a ceiling rather than a `while` because the thing being repeated is the
+ * only paid call in the app.
+ */
+const MAX_COMMUTE_PASSES = 5;
+
 export function MapPanel({ rows }: { rows: ListingRow[] }) {
   const { person } = usePerson();
   const qc = useQueryClient();
   const { data: locations = [] } = useLocations();
   const hidden = useHiddenLocationIds(person?.id);
-  const primaryId = usePrimaryLocationId(person?.id);
+  const primaryId = usePrimaryLocationId(person?.id, locations);
   const [selectedId, setSelectedId] = useState<Uuid | null>(null);
   const [locating, setLocating] = useState(false);
 
@@ -75,8 +83,13 @@ export function MapPanel({ rows }: { rows: ListingRow[] }) {
       try {
         const result = await geocodeListing(row.id);
         if (result.disabled) {
+          // Not "we got through 3 of 60" — the feature does not exist on this
+          // deployment, and every remaining call would say the same thing.
+          // `break` used to fall through to the summary below, which replaced
+          // this toast with "Placed 0 of 3" and hid the only useful sentence.
           toast.error("Maps aren't configured on this deployment.", { id: toastId });
-          break;
+          setLocating(false);
+          return;
         }
         if (result.lat == null) missed += 1;
         else found += 1;
@@ -92,13 +105,45 @@ export function MapPanel({ rows }: { rows: ListingRow[] }) {
       });
       // One request for every pair that just became computable, rather than one
       // per listing: the route only asks Google about the missing squares.
-      void computeCommutes({})
-        .then(() => qc.invalidateQueries({ queryKey: queryKeys.listings }))
-        .catch((error) => console.warn("commute backfill failed", error));
+      void backfillCommutes();
     } else {
       toast.error("Couldn't place any of those.", { id: toastId });
     }
     setLocating(false);
+  }
+
+  /**
+   * Fill in the commute grid for everything that just got a pin.
+   *
+   * `/api/commutes` caps itself at `MAX_PAIRS` (300) and at a wall clock, so a
+   * batch of freshly placed listings is routinely more than one call's work —
+   * and the old single call left the rest until somebody happened to press
+   * something. Each pass asks for whatever is still missing.
+   *
+   * The loop stops when a pass buys nothing (`computed === 0`), which means
+   * everything left is already cached, and at five passes regardless: this
+   * spends money, and a runaway loop here is the one bug in the app that
+   * arrives as an invoice.
+   */
+  async function backfillCommutes() {
+    for (let pass = 1; pass <= MAX_COMMUTE_PASSES; pass += 1) {
+      let result;
+      try {
+        result = await computeCommutes({});
+      } catch (error) {
+        console.warn("commute backfill failed", error);
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: queryKeys.listings });
+      // `skipped` counts *fresh* pairs as well as unreached ones, so it is only
+      // a to-do list while the route is still finding work to do.
+      if (result.computed === 0 || result.skipped === 0) return;
+      if (pass === MAX_COMMUTE_PASSES) {
+        toast.info(`${result.skipped} commute times still to work out.`, {
+          description: "They fill in next time something is placed, or on Refresh times.",
+        });
+      }
+    }
   }
 
   return (

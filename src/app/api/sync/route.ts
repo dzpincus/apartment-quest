@@ -25,7 +25,7 @@ import "server-only";
  */
 
 import { NextResponse } from "next/server";
-import { cronAuthorized, hasSession } from "@/lib/api-auth";
+import { cronAuthorized, hasSession, UUID_RE } from "@/lib/api-auth";
 import { adminEnabled, createAdminClient } from "@/lib/supabase/admin";
 import { listingLabel } from "@/lib/format";
 import { nowNY } from "@/lib/time";
@@ -73,8 +73,6 @@ const BLOCK_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000;
  * first next run: `state_checked_at` never moved, so they are the oldest rows.
  */
 const RUN_BUDGET_MS = 240_000;
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The columns a check reads. */
 type Candidate = {

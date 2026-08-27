@@ -17,6 +17,9 @@ import "server-only";
  *
  * TOS note: Routes results are displayed without a Google map, which is allowed
  * as long as "Powered by Google" appears with them — see the commute card.
+ *
+ * Staging safety: outside production this module does not call Google at all
+ * unless `AQ_ROUTES_LIVE=1` — see `routesLive()`.
  */
 
 import { TZDate } from "@date-fns/tz";
@@ -63,6 +66,25 @@ export type RouteRequest = {
 
 export function routesEnabled(): boolean {
   return Boolean(process.env.GOOGLE_MAPS_API_KEY);
+}
+
+/**
+ * Is this deployment allowed to actually spend a Routes call?
+ *
+ * Production always is. Everywhere else — a preview branch, a local dev server,
+ * a `pnpm build` smoke test — has to say so with `AQ_ROUTES_LIVE=1`, because
+ * every other environment shares the *same* Google key and the same 10k/month
+ * free tier as the real one. One PR branch with sixty listings and five saved
+ * places is 900 calls somebody did not mean to make, and the answers land in a
+ * preview's database where nobody will ever look at them.
+ *
+ * `VERCEL_ENV` is Vercel's own word (`production` / `preview` / `development`)
+ * and is not set at all outside it, which is exactly right: an unknown
+ * environment is not production.
+ */
+export function routesLive(): boolean {
+  if (process.env.VERCEL_ENV === "production") return true;
+  return process.env.AQ_ROUTES_LIVE === "1";
 }
 
 /**
@@ -141,6 +163,20 @@ export function routeErrorMessage(status: number, body: unknown): string {
 export async function computeRoute(request: RouteRequest): Promise<RouteOutcome> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) throw new RoutesDisabledError();
+
+  // Dry run everywhere but production: log what would have been asked and hand
+  // back an ordinary failed outcome, which every caller already handles. It is
+  // stored with the one-hour error TTL (`ERROR_MAX_AGE_MS`), so a preview
+  // cannot pin a month of em dashes onto rows production shares.
+  if (!routesLive()) {
+    console.info("[routes] DRY-RUN", {
+      mode: request.mode,
+      origin: `${request.origin.lat},${request.origin.lng}`,
+      destination: `${request.destination.lat},${request.destination.lng}`,
+      env: process.env.VERCEL_ENV ?? "local",
+    });
+    return { ok: false, error: "dry-run (non-production)" };
+  }
 
   const travelMode = GOOGLE_TRAVEL_MODE[request.mode];
   const body: Record<string, unknown> = {

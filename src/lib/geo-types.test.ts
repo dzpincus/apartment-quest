@@ -3,9 +3,11 @@ import {
   commuteMinutes,
   emptyCommutes,
   geocodeFailure,
+  isFresh,
   mapsDirectionsUrl,
   pinStatus,
   COMMUTE_MAX_AGE_MS,
+  ERROR_MAX_AGE_MS,
 } from "./geo-types";
 
 const LISTING = { lat: 40.7173, lng: -73.95687 };
@@ -71,6 +73,67 @@ describe("emptyCommutes", () => {
 describe("COMMUTE_MAX_AGE_MS", () => {
   it("is thirty days", () => {
     expect(COMMUTE_MAX_AGE_MS).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe("ERROR_MAX_AGE_MS", () => {
+  it("is one hour — a failure is not an answer worth keeping for a month", () => {
+    expect(ERROR_MAX_AGE_MS).toBe(60 * 60 * 1000);
+  });
+});
+
+describe("isFresh", () => {
+  const NOW = Date.parse("2025-06-15T12:00:00Z");
+  const ago = (ms: number) => new Date(NOW - ms).toISOString();
+  const MINUTE = 60 * 1000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+
+  it("keeps a real answer for thirty days", () => {
+    expect(isFresh({ computed_at: ago(29 * DAY), error: null }, NOW)).toBe(true);
+    expect(isFresh({ computed_at: ago(DAY), error: null }, NOW)).toBe(true);
+  });
+
+  it("lets a real answer go at thirty days", () => {
+    expect(isFresh({ computed_at: ago(30 * DAY), error: null }, NOW)).toBe(false);
+    expect(isFresh({ computed_at: ago(31 * DAY), error: null }, NOW)).toBe(false);
+  });
+
+  it("keeps an errored row for an hour and no longer", () => {
+    // The reason a pair failed is nearly always transient or fixed from
+    // outside the app — a key restriction, billing, a 429, a preview's
+    // dry-run. Thirty days of that is an em dash nobody can clear.
+    expect(isFresh({ computed_at: ago(59 * MINUTE), error: "Google took too long." }, NOW)).toBe(
+      true,
+    );
+    expect(isFresh({ computed_at: ago(HOUR), error: "Google took too long." }, NOW)).toBe(false);
+    expect(isFresh({ computed_at: ago(2 * HOUR), error: "No route." }, NOW)).toBe(false);
+  });
+
+  it("re-asks a day-old dry-run row, which a thirty-day TTL would have pinned", () => {
+    expect(
+      isFresh({ computed_at: ago(DAY), error: "dry-run (non-production)" }, NOW),
+    ).toBe(false);
+  });
+
+  it("treats a row that was never really computed as stale", () => {
+    expect(isFresh({ computed_at: null, error: null }, NOW)).toBe(false);
+    expect(isFresh({ computed_at: "", error: null }, NOW)).toBe(false);
+    expect(isFresh({ computed_at: "not a date", error: null }, NOW)).toBe(false);
+    expect(isFresh({}, NOW)).toBe(false);
+  });
+
+  it("does not spend money over a clock disagreement", () => {
+    // A stamp in the future is somebody's clock, not a reason to re-buy a row.
+    expect(isFresh({ computed_at: new Date(NOW + DAY).toISOString(), error: null }, NOW)).toBe(
+      true,
+    );
+  });
+
+  it("reads an empty-string error as no error at all", () => {
+    // PostgREST hands back exactly what is in the column; `''` is not a stored
+    // failure, and treating it as one would re-buy the row every hour.
+    expect(isFresh({ computed_at: ago(2 * HOUR), error: "" }, NOW)).toBe(true);
   });
 });
 

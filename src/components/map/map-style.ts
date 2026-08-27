@@ -24,6 +24,22 @@
 export const OPENFREEMAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
 
 /**
+ * The lifeboat. CARTO's `dark_all` raster tiles need no key and no style JSON —
+ * one URL template and an attribution line — so when OpenFreeMap's style
+ * endpoint is down there is still a map under the pins instead of a purple
+ * rectangle with an apology on it. Raster, so `duskCandy()` has nothing to do:
+ * it is already dark, and the background under it is the page colour.
+ *
+ * Attribution is not optional here either (CLAUDE.md): the string below is
+ * handed to MapLibre's own attribution control through the source.
+ */
+export const CARTO_DARK_TILE_URL = "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+export const CARTO_ATTRIBUTION = "© OpenStreetMap contributors © CARTO";
+
+/** The message both maps show when even the lifeboat could not be launched. */
+export const MAP_STYLE_FAILED_MESSAGE = "The map tiles wouldn't load.";
+
+/**
  * The parts of a MapLibre style this module touches. Structural on purpose:
  * the real `StyleSpecification` lives in `@maplibre/maplibre-gl-style-spec`,
  * which is maplibre-gl's dependency and not ours, and a type-only import of a
@@ -250,12 +266,41 @@ export function duskCandy(style: MapStyle): MapStyle {
   return { ...style, layers };
 }
 
+/** A whole style, from two constants. Fresh each call — MapLibre mutates. */
+export function cartoDarkStyle(): MapStyle {
+  return {
+    version: 8,
+    sources: {
+      carto: {
+        type: "raster",
+        tiles: [CARTO_DARK_TILE_URL],
+        tileSize: 256,
+        attribution: CARTO_ATTRIBUTION,
+      },
+    },
+    layers: [
+      {
+        id: "background",
+        type: "background",
+        paint: { "background-color": DUSK.background },
+      },
+      { id: "carto", type: "raster", source: "carto" },
+    ],
+  };
+}
+
 let cache: Promise<MapStyle> | null = null;
 
 /**
  * The style, fetched once per session and shared by every map on the page —
  * the listings map and the detail card's mini map ask at the same moment and
- * get one request. A failure clears the cache so the next map retries.
+ * get one request.
+ *
+ * It does not reject. OpenFreeMap being down is not a reason for a listing to
+ * lose its map: the failure falls back to CARTO's keyless dark raster tiles,
+ * which is a worse-looking map and a working one. The cache is still cleared
+ * on the way past, so the *next* map on the page asks OpenFreeMap again rather
+ * than inheriting the lifeboat for the rest of the session.
  */
 export function loadMapStyle(
   fetchImpl: typeof fetch = fetch,
@@ -269,7 +314,8 @@ export function loadMapStyle(
     .then(duskCandy)
     .catch((error) => {
       cache = null;
-      throw error;
+      console.warn("[map] style fetch failed — falling back to CARTO raster", error);
+      return cartoDarkStyle();
     });
   return cache;
 }

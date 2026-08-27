@@ -25,6 +25,7 @@ import {
   type Sort,
   type SortKey,
 } from "@/lib/listing-filters";
+import { useLocations } from "@/lib/queries";
 import { usePrimaryLocationId, type ListingsView } from "@/lib/prefs";
 import { VOTE_LABELS, type MyVoteFilter } from "@/lib/votes";
 import { cn } from "@/lib/utils";
@@ -94,7 +95,10 @@ export function ListingsToolbar({
     onFiltersChange({ ...filters, [key]: value });
 
   const { person, people } = usePerson();
-  const primaryId = usePrimaryLocationId(person?.id);
+  const { data: locations } = useLocations();
+  // The "Transit to ⭐" sort option follows the column, which follows the
+  // starred place actually being in the loaded list — see `prefs.ts`.
+  const primaryId = usePrimaryLocationId(person?.id, locations);
 
   const hoods: SelectOption[] = [
     { value: "all", label: "Any neighborhood" },

@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LocationsDialog } from "@/components/listings/locations-dialog";
+import { PoweredByGoogle } from "@/components/listings/powered-by-google";
 import { commuteIndex, useCommutes, useLocations, type ListingRow } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
 import { useMutations } from "@/lib/mutations";
@@ -56,7 +57,7 @@ export function CommuteCard({ listing }: { listing: ListingRow }) {
   const { data: locations = [] } = useLocations();
   const { data: commutes = [] } = useCommutes(listing.id);
   const hidden = useHiddenLocationIds(person?.id);
-  const primaryId = usePrimaryLocationId(person?.id);
+  const primaryId = usePrimaryLocationId(person?.id, locations);
   const { geocodeListing, setListingCoords, computeCommutes } = useMutations(person?.id);
 
   const [moving, setMoving] = useState(false);
@@ -65,9 +66,27 @@ export function CommuteCard({ listing }: { listing: ListingRow }) {
   const status = pinStatus(listing);
   const placed = listing.lat != null && listing.lng != null;
 
-  // Drag-to-correct is offered without being asked for when the geocoder said
-  // it was guessing — that warning is only useful next to the fix.
-  const draggable = moving || status === "check";
+  /**
+   * Drag-to-correct is offered without being asked for when the geocoder said
+   * it was guessing — that warning is only useful next to the fix.
+   *
+   * Latched, and that is the whole point of the state: a landed drag writes
+   * `geocode_note: 'manual'`, so `status` stops being `"check"` the instant
+   * somebody lets go of the pin. `movable` is MapLibre's `interactive`, which
+   * is a *constructor* option — flipping it back destroys the map and builds a
+   * frozen one in its place, one tick after a drop, which read as the app
+   * snatching the map away as a reward for using it.
+   */
+  const [offered, setOffered] = useState(status === "check");
+  // Adjusted during render rather than in an effect: React's own answer for
+  // state derived from a prop that has changed, and it means the map is never
+  // built frozen and then rebuilt movable a tick later.
+  const [lastStatus, setLastStatus] = useState(status);
+  if (status !== lastStatus) {
+    setLastStatus(status);
+    if (status === "check") setOffered(true);
+  }
+  const draggable = moving || offered;
 
   const [station, setStation] = useState<NearestStation | null>(null);
   useEffect(() => {
@@ -135,7 +154,18 @@ export function CommuteCard({ listing }: { listing: ListingRow }) {
                 variant={draggable ? "secondary" : "ghost"}
                 size="sm"
                 aria-pressed={draggable}
-                onClick={() => setMoving((v) => !v)}
+                // "Done moving" has to clear the latch as well as the toggle,
+                // or a pin that was ever offered for correction could never be
+                // put down. A teardown here is a deliberate press, not the
+                // surprise one that happened a tick after every drop.
+                onClick={() => {
+                  if (draggable) {
+                    setMoving(false);
+                    setOffered(false);
+                  } else {
+                    setMoving(true);
+                  }
+                }}
               >
                 <Crosshair />
                 {draggable ? "Done moving" : "Move pin"}
@@ -160,7 +190,12 @@ export function CommuteCard({ listing }: { listing: ListingRow }) {
           />
         )}
 
-        {shown.length === 0 ? (
+        {/* No pin, no table. Every cell below is a Google Maps deep link built
+            from the listing's coordinates, and with none they are built from
+            0,0 — a spot in the Gulf of Guinea. A grid of em dashes linking to
+            the middle of the ocean is not a smaller answer than the "Locate"
+            button above it; it is a wrong one. */}
+        {!placed ? null : shown.length === 0 ? (
           <p className="rounded-2xl border-2 border-dashed border-border p-4 text-center text-sm text-muted-foreground">
             Add a place you go a lot — work, gym, the good bagel spot.
           </p>
@@ -210,8 +245,9 @@ export function CommuteCard({ listing }: { listing: ListingRow }) {
         )}
 
         {/* Google's terms allow Routes results away from a Google map only with
-            this credit. Small, muted, and not optional. */}
-        <p className="text-[11px] text-faint">Powered by Google</p>
+            this credit. Small, muted, and not optional — and gone with the
+            table, because there is nothing left to credit. */}
+        {placed && shown.length > 0 && <PoweredByGoogle />}
       </CardContent>
     </Card>
   );

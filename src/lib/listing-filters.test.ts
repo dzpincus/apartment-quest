@@ -682,7 +682,7 @@ function commute(
   seconds: number | null,
   error: string | null = null,
 ): CommuteRef {
-  return { location_id: locationId, mode, seconds, meters: null, error };
+  return { location_id: locationId, mode, seconds, error };
 }
 
 describe("transitSeconds", () => {
