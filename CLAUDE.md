@@ -278,10 +278,23 @@ a blurry photo is not an impression.
 
 **In the UI**: `PhotoGallery` sits at the top of the detail page (snap-scroll
 strip on mobile, grid on desktop) with a lightbox on tap — arrow keys, swipe,
-and a "3 / 9" counter. The listing cards show a 64px thumb, the table a 40px
-one, and both fall back to a `bg-inset` tile with a lucide `Image` glyph so the
-rows stay aligned. `listing_photos` is in the realtime publication and maps to
-the `listings` / `listing(id)` keys, which is what makes an import feel live:
+and a "3 / 9" counter. The listing cards give the photos the card's whole
+width as a `PhotoCarousel` (`src/components/listings/photo-carousel.tsx`) in a
+fixed 16:10 box — a native `snap-x` scroll container for swipe, with the
+chevrons overlaid *inside* the picture so they can never land on the address
+under it. A resting card renders exactly one `<img>`, slide 0; the first
+touch, arrow click or arrow key **arms** it, every slide becomes real at once
+and `prefetchPhotos` (`src/lib/photos-client.ts`) warms the whole set, because
+sixty cards × eight photos is 480 requests for a page nobody has scrolled. A
+tap that was not a swipe opens the same `PhotoLightbox` the detail gallery
+uses; the map's mini card is the same carousel at 16:9. The table keeps its
+40px thumb, now a button that prefetches and opens that lightbox — 40px is too
+small to browse in — and a listing with no photos still falls back to a
+`bg-inset` tile with a lucide `Image` glyph so the rows stay aligned. The
+arithmetic (`nextIndex`, `prevIndex`, `slidesToRender`) sits in
+`src/lib/carousel.ts`, pure and tested. `listing_photos` is in the realtime
+publication and maps to the `listings` / `listing(id)` keys, which is what
+makes an import feel live:
 the dialog navigates away while the route is still working and thumbnails
 appear one by one.
 
