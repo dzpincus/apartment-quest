@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeFilterCount,
   amenityRank,
   applyFilters,
+  clearFilter,
   defaultSortDir,
   EMPTY_FILTERS,
+  FILTER_KEYS,
   hasActiveFilters,
   neighborhoods,
   sortRows,
@@ -111,6 +114,70 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("activeFilterCount / clearFilter", () => {
+  it("counts nothing on the default filters", () => {
+    expect(activeFilterCount(EMPTY_FILTERS)).toBe(0);
+  });
+
+  it("counts one per narrowed field, rent min and max separately", () => {
+    expect(activeFilterCount(filters({ pets: "yes" }))).toBe(1);
+    expect(activeFilterCount(filters({ rentMin: "2000", rentMax: "4000" }))).toBe(2);
+    expect(
+      activeFilterCount(
+        filters({
+          rentMin: "2000",
+          rentMax: "4000",
+          bedsMin: "2",
+          neighborhood: "Bushwick",
+          status: "contacted",
+          feeType: "no_fee",
+          pets: "yes",
+          laundry: "in_unit",
+          dishwasher: "yes",
+          ac: "central",
+          outdoor_space: "private",
+          myVote: "none",
+        }),
+      ),
+    ).toBe(FILTER_KEYS.length);
+  });
+
+  it("counts an explicit 'unknown' pick — it is a narrowing, not a default", () => {
+    expect(activeFilterCount(filters({ pets: "unknown" }))).toBe(1);
+    expect(activeFilterCount(filters({ laundry: "unknown", myVote: "none" }))).toBe(2);
+  });
+
+  it("agrees with hasActiveFilters", () => {
+    const cases = [EMPTY_FILTERS, filters({ ac: "window" }), filters({ bedsMin: "1" })];
+    for (const f of cases) {
+      expect(hasActiveFilters(f)).toBe(activeFilterCount(f) > 0);
+    }
+  });
+
+  it("lists every filter exactly once", () => {
+    expect([...FILTER_KEYS].sort()).toEqual(
+      (Object.keys(EMPTY_FILTERS) as Array<keyof Filters>).sort(),
+    );
+  });
+
+  it("clears one field and leaves the rest alone", () => {
+    const before = filters({ rentMax: "4000", pets: "yes", neighborhood: "Bushwick" });
+    const after = clearFilter(before, "pets");
+    expect(after.pets).toBe("all");
+    expect(after.rentMax).toBe("4000");
+    expect(after.neighborhood).toBe("Bushwick");
+    expect(activeFilterCount(after)).toBe(2);
+    // Pure: the caller's object is untouched.
+    expect(before.pets).toBe("yes");
+  });
+
+  it("clearing every active field lands back on the defaults", () => {
+    const before = filters({ rentMin: "1", rentMax: "2", bedsMin: "3", myVote: "yes" });
+    const after = FILTER_KEYS.reduce(clearFilter, before);
+    expect(after).toEqual(EMPTY_FILTERS);
   });
 });
 

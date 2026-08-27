@@ -17,7 +17,6 @@ const INK = "#1a1836";
 const PAGE = "#1a1836";
 const FOREGROUND = "#f2efff";
 const PRIMARY = "#ffd56b";
-const QUIET = "#8ed8ff";
 
 export type ListingPinState = {
   /** Off-market or removed: still on the map, quieter (`gone?` in the table). */
@@ -99,17 +98,6 @@ export function locationPinElement(options: {
   return el;
 }
 
-/** A subway station: a dot the size of a full stop, and its name on hover. */
-export function stationDotElement(name: string, lines: string[]): HTMLDivElement {
-  const el = document.createElement("div");
-  el.className = "aq-station-dot";
-  const label = lines.length > 0 ? `${name} (${lines.join(", ")})` : name;
-  el.title = label;
-  el.setAttribute("role", "img");
-  el.setAttribute("aria-label", `Subway: ${label}`);
-  return el;
-}
-
 /**
  * The one place the pins' CSS lives. Injected as a `<style>` element the first
  * time a map mounts rather than sitting in `globals.css`: nothing on the
@@ -146,12 +134,6 @@ export const MAP_CSS = `
   width: 28px; height: 28px; border-radius: 999px;
   border: 2px solid ${PRIMARY}; background: rgba(26,24,54,0.92);
   font-size: 14px; line-height: 1;
-}
-
-.aq-station-dot {
-  width: 7px; height: 7px; border-radius: 999px;
-  background: ${QUIET}; opacity: 0.85;
-  box-shadow: 0 0 0 2px rgba(26,24,54,0.75);
 }
 
 .aq-map .maplibregl-ctrl-attrib,

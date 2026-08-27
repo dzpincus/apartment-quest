@@ -17,7 +17,7 @@
  */
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // Not `maplibre-gl` directly: that module sets the worker URL, which Turbopack
 // otherwise leaves empty. See `maplibre.ts`.
 import {
@@ -32,9 +32,13 @@ import {
   ensureMapCss,
   listingPinElement,
   locationPinElement,
-  stationDotElement,
 } from "@/components/map/pin";
-import { loadStations, type Station } from "@/lib/geo/stations";
+import {
+  loadStations,
+  stationsGeoJSON,
+  type Station,
+  type StationFeatureCollection,
+} from "@/lib/geo/stations";
 import { listingLabel, rentShort } from "@/lib/format";
 import { isVanished } from "@/lib/queue";
 import { cn } from "@/lib/utils";
@@ -44,8 +48,27 @@ import type { Location, Uuid } from "@/lib/types";
 /** Manhattan-ish. Only ever seen when nothing on screen has coordinates. */
 const NYC: [number, number] = [-73.97, 40.72];
 
-/** Below this, station dots would be a grey wash rather than information. */
-export const STATION_MIN_ZOOM = 14;
+/**
+ * Zoom at which a station stops being a dot and starts being a place with a
+ * name on it. The listings fit-bounds lands around 11-12, so this can no
+ * longer be the zoom at which stations *exist* — that read as a broken toggle.
+ */
+export const STATION_LABEL_MIN_ZOOM = 14;
+
+/** The line letters ("A C E") arrive two zooms before the station name does. */
+export const STATION_LINES_MIN_ZOOM = 12;
+
+/** One GeoJSON source, three layers hung off it. */
+const STATION_SOURCE = "aq-stations";
+const STATION_DOTS_LAYER = "aq-station-dots";
+const STATION_LINES_LAYER = "aq-station-lines";
+const STATION_NAMES_LAYER = "aq-station-names";
+const STATION_LAYERS = [STATION_DOTS_LAYER, STATION_LINES_LAYER, STATION_NAMES_LAYER];
+
+/** `--quiet` and the page colour: a station is information, not a headline. */
+const STATION_COLOR = "#8ed8ff";
+const STATION_STROKE = "#1a1836";
+const STATION_TEXT = "#f2efff";
 
 /** One pin fit to its own bounds would be zoom 22, i.e. a roof. */
 const SINGLE_PIN_ZOOM = 15;
@@ -105,7 +128,6 @@ export function ListingsMap({
   // that survives would leave the second map with no pins on it at all.
   const markersRef = useRef(new Map<Uuid, { marker: Marker; el: HTMLElement; key: string }>());
   const locationMarkersRef = useRef<Marker[]>([]);
-  const stationMarkersRef = useRef<Marker[]>([]);
 
   // -- the map itself ---------------------------------------------------------
 
@@ -145,7 +167,6 @@ export function ListingsMap({
       cancelled = true;
       markers.clear();
       locationMarkersRef.current = [];
-      stationMarkersRef.current = [];
       mapRef.current?.remove();
       mapRef.current = null;
       setReady(false);
@@ -287,34 +308,37 @@ export function ListingsMap({
     };
   }, [showStations, stations]);
 
-  const drawStations = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    for (const marker of stationMarkersRef.current) marker.remove();
-    stationMarkersRef.current = [];
-    if (!showStations || !stations || map.getZoom() < STATION_MIN_ZOOM) return;
-    const bounds = map.getBounds();
-    for (const station of stations) {
-      if (!bounds.contains([station.lng, station.lat])) continue;
-      stationMarkersRef.current.push(
-        new Marker({ element: stationDotElement(station.name, station.lines) })
-          .setLngLat([station.lng, station.lat])
-          .addTo(map),
-      );
-    }
-  }, [showStations, stations]);
+  const stationData = useMemo(
+    () => (stations ? stationsGeoJSON(stations) : null),
+    [stations],
+  );
 
+  // The subway is a source and three layers, not four hundred markers.
+  // MapLibre culls to the viewport, scales the dots with zoom and collides the
+  // labels on the GPU, so there is no per-`moveend` redraw to write and no cap
+  // to pick — and, unlike the marker pass this replaces, the dots are there at
+  // whatever zoom the listings fit-bounds happens to land on.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !stationData) return;
+    const source = map.getSource(STATION_SOURCE) as
+      | { setData?: (data: StationFeatureCollection) => void }
+      | undefined;
+    if (source?.setData) source.setData(stationData);
+    else addStationLayers(map, stationData);
+  }, [ready, stationData]);
+
+  // Toggling is a layout property, not a teardown: the source stays uploaded,
+  // so turning the chip back on is a frame rather than a fetch. Its own effect
+  // so that a tap on the chip does not re-upload 445 points.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    drawStations();
-    // Four hundred dots on a city-wide view would be a grey wash, so the set
-    // is recomputed for the viewport every time the viewport settles.
-    map.on("moveend", drawStations);
-    return () => {
-      map.off("moveend", drawStations);
-    };
-  }, [drawStations, ready]);
+    for (const id of STATION_LAYERS) {
+      if (!map.getLayer(id)) continue;
+      map.setLayoutProperty(id, "visibility", showStations ? "visible" : "none");
+    }
+  }, [ready, stationData, showStations]);
 
   return (
     <div className={cn("relative overflow-hidden rounded-[20px] border-2 border-border", className)}>
@@ -336,7 +360,7 @@ export function ListingsMap({
         <MapChip
           on={showStations}
           onClick={() => setShowStations((v) => !v)}
-          label="Subway stations, from zoom 14"
+          label="Subway stations"
         >
           🚇 Stations
         </MapChip>
@@ -355,6 +379,106 @@ export function ListingsMap({
       )}
     </div>
   );
+}
+
+/**
+ * The font the basemap is already using, or null when the style cannot spell.
+ *
+ * MapLibre only draws text it has glyphs for, and the CARTO lifeboat style
+ * (`map-style.ts`) is raster tiles with no glyph endpoint at all — asking it
+ * for "Noto Sans Regular" would be one console error per tile and no labels
+ * either way. Borrowing the stack from an existing symbol layer also means the
+ * station names are set in whatever OpenFreeMap ships, rather than in a font
+ * name hard-coded here that upstream is free to stop hosting.
+ */
+function stationFontStack(map: MapLibreMap): string[] | null {
+  const style = map.getStyle() as unknown as {
+    glyphs?: string;
+    layers?: { type?: string; layout?: Record<string, unknown> }[];
+  };
+  if (!style.glyphs) return null;
+  for (const layer of style.layers ?? []) {
+    if (layer.type !== "symbol") continue;
+    const font = layer.layout?.["text-font"];
+    if (Array.isArray(font) && font.length > 0 && font.every((f) => typeof f === "string")) {
+      return font as string[];
+    }
+  }
+  return ["Noto Sans Regular"];
+}
+
+/**
+ * Source plus layers, added hidden — the effect above turns them on. Split out
+ * of the component because it is a hundred lines of style spec and none of it
+ * closes over a prop.
+ */
+function addStationLayers(map: MapLibreMap, data: StationFeatureCollection): void {
+  map.addSource(STATION_SOURCE, { type: "geojson", data });
+
+  map.addLayer({
+    id: STATION_DOTS_LAYER,
+    type: "circle",
+    source: STATION_SOURCE,
+    layout: { visibility: "none" },
+    paint: {
+      "circle-color": STATION_COLOR,
+      "circle-stroke-color": STATION_STROKE,
+      // A full stop across a borough, a target on a street. This is what the
+      // old `zoom >= 14` gate was actually after, done by interpolation
+      // instead of by an all-or-nothing threshold.
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 15, 8],
+      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2],
+      "circle-opacity": 0.9,
+    },
+  });
+
+  const font = stationFontStack(map);
+  if (!font) return;
+
+  // The routes, under the dot: at zoom 12 "L" or "A C E" is the useful fact
+  // about a station — which train, not which entrance.
+  map.addLayer({
+    id: STATION_LINES_LAYER,
+    type: "symbol",
+    source: STATION_SOURCE,
+    minzoom: STATION_LINES_MIN_ZOOM,
+    layout: {
+      visibility: "none",
+      "text-field": ["get", "lines_label"],
+      "text-font": font,
+      "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 15, 12],
+      "text-offset": [0, 1.1],
+      // Collision on, deliberately: in midtown the honest answer is to drop
+      // some labels, not to stack them into a smear.
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": STATION_TEXT,
+      "text-halo-color": STATION_STROKE,
+      "text-halo-width": 1.2,
+    },
+  });
+
+  // The name, above the dot, once there is room to read it.
+  map.addLayer({
+    id: STATION_NAMES_LAYER,
+    type: "symbol",
+    source: STATION_SOURCE,
+    minzoom: STATION_LABEL_MIN_ZOOM,
+    layout: {
+      visibility: "none",
+      "text-field": ["get", "name"],
+      "text-font": font,
+      "text-size": 11,
+      "text-offset": [0, -1.2],
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": STATION_TEXT,
+      "text-halo-color": STATION_STROKE,
+      "text-halo-width": 1.2,
+    },
+  });
 }
 
 /**

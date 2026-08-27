@@ -61,7 +61,9 @@ export default function ListingsPage() {
   );
 
   return (
-    <div className="space-y-4">
+    // `min-w-0`: the toolbar and the cards below are the two things on this
+    // page that can be asked to hold more than a phone is wide.
+    <div className="min-w-0 space-y-4">
       <ListingsToolbar
         filters={filters}
         onFiltersChange={setFilters}
@@ -97,7 +99,7 @@ export default function ListingsPage() {
         <MapPanel rows={rows} />
       ) : (
         <>
-          <div className="hidden md:block">
+          <div className="hidden min-w-0 md:block">
             <ListingsTable
               rows={rows}
               incomes={incomes}
@@ -105,7 +107,7 @@ export default function ListingsPage() {
               onSortChange={setSort}
             />
           </div>
-          <div className="md:hidden">
+          <div className="min-w-0 md:hidden">
             <ListingCards rows={rows} incomes={incomes} />
           </div>
         </>

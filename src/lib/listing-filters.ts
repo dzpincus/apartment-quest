@@ -46,21 +46,49 @@ export const EMPTY_FILTERS: Filters = {
   myVote: "all",
 };
 
+/**
+ * Every filter, in the order the toolbar shows them.
+ *
+ * "Active" is defined once, here, as "not what `EMPTY_FILTERS` says": the
+ * count on the mobile Filters button, the chips under it and
+ * `hasActiveFilters` all read this list, so a thirteenth filter cannot land
+ * with a button that keeps saying (12).
+ */
+export const FILTER_KEYS: ReadonlyArray<keyof Filters> = [
+  "rentMin",
+  "rentMax",
+  "bedsMin",
+  "neighborhood",
+  "status",
+  "feeType",
+  "pets",
+  "laundry",
+  "dishwasher",
+  "ac",
+  "outdoor_space",
+  "myVote",
+];
+
+export function isFilterActive(f: Filters, key: keyof Filters): boolean {
+  return f[key] !== EMPTY_FILTERS[key];
+}
+
+/**
+ * How many filters are narrowing the list — the `(n)` on the phone's Filters
+ * button. Rent min and rent max count separately, because they are two chips
+ * and two things to undo.
+ */
+export function activeFilterCount(f: Filters): number {
+  return FILTER_KEYS.reduce((n, key) => (isFilterActive(f, key) ? n + 1 : n), 0);
+}
+
 export function hasActiveFilters(f: Filters): boolean {
-  return (
-    f.rentMin !== "" ||
-    f.rentMax !== "" ||
-    f.bedsMin !== "" ||
-    f.neighborhood !== "all" ||
-    f.status !== "all" ||
-    f.feeType !== "all" ||
-    f.pets !== "all" ||
-    f.laundry !== "all" ||
-    f.dishwasher !== "all" ||
-    f.ac !== "all" ||
-    f.outdoor_space !== "all" ||
-    f.myVote !== "all"
-  );
+  return activeFilterCount(f) > 0;
+}
+
+/** One filter back to its default — what a chip's × does. */
+export function clearFilter(f: Filters, key: keyof Filters): Filters {
+  return { ...f, [key]: EMPTY_FILTERS[key] };
 }
 
 export type SortKey =

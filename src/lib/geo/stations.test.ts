@@ -4,6 +4,7 @@ import {
   nearestStation,
   parseStations,
   resetStationCache,
+  stationsGeoJSON,
   type Station,
 } from "./stations";
 
@@ -146,5 +147,34 @@ describe("loadStations", () => {
     await expect(loadStations(fetchImpl, "/x")).resolves.toHaveLength(5);
     expect(calls).toBe(2);
     resetStationCache();
+  });
+});
+
+describe("stationsGeoJSON", () => {
+  it("writes [lng, lat] back out the way GeoJSON reads it", () => {
+    const [first] = stationsGeoJSON(STATIONS).features;
+    expect(first.geometry.coordinates).toEqual([-73.95687, 40.7173]);
+    expect(first.properties.name).toBe("Bedford Av");
+  });
+
+  it("precomputes the line letters the symbol layer prints", () => {
+    const byName = new Map(
+      stationsGeoJSON(STATIONS).features.map((f) => [f.properties.name, f.properties.lines_label]),
+    );
+    expect(byName.get("Bedford Av")).toBe("L");
+    expect(byName.get("Lorimer St/Metropolitan Av")).toBe("G L");
+    expect(byName.get("14 St-Union Sq")).toBe("4 5 6 L N Q R W");
+  });
+
+  it("gives a station with no routes an empty label rather than undefined", () => {
+    const [only] = stationsGeoJSON([{ name: "Ghost", lines: [], lat: 40.7, lng: -74 }]).features;
+    expect(only.properties.lines_label).toBe("");
+  });
+
+  it("is a FeatureCollection of every station it was handed", () => {
+    const collection = stationsGeoJSON(STATIONS);
+    expect(collection.type).toBe("FeatureCollection");
+    expect(collection.features).toHaveLength(STATIONS.length);
+    expect(stationsGeoJSON([]).features).toEqual([]);
   });
 });

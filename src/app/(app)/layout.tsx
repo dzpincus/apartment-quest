@@ -24,7 +24,12 @@ export default async function AppLayout({
       <RealtimeProvider>
         <PersonProvider>
           <Nav />
-          <main className="mx-auto w-full max-w-5xl px-4 pt-2 pb-32 md:pt-4 md:pb-8">
+          {/* `overflow-x-hidden` is a backstop, not the fix: nothing inside
+              should be wider than the phone, and the toolbar and the cards are
+              built so it is not. It is here so that the day something is, the
+              page still cannot be dragged sideways with every card's right
+              edge hanging off the screen. */}
+          <main className="mx-auto w-full max-w-5xl overflow-x-hidden px-4 pt-2 pb-32 md:pt-4 md:pb-8">
             {children}
           </main>
         </PersonProvider>

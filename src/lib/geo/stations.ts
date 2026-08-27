@@ -68,6 +68,43 @@ export function parseStations(geojson: unknown): Station[] {
   return out;
 }
 
+/**
+ * One station, as MapLibre wants it: a point, a name, and the routes already
+ * joined into the string the symbol layer prints (`text-field` takes a
+ * property, not an array, and doing the join per frame in an expression is
+ * both slower and harder to read than doing it once here).
+ *
+ * Spelled out structurally rather than imported from `geojson`, which is a
+ * transitive dependency of `maplibre-gl` and not ours — same reasoning as
+ * `MapStyle` in `map-style.ts`.
+ */
+export type StationFeature = {
+  type: "Feature";
+  geometry: { type: "Point"; coordinates: [number, number] };
+  properties: { name: string; lines_label: string };
+};
+
+export type StationFeatureCollection = {
+  type: "FeatureCollection";
+  features: StationFeature[];
+};
+
+/**
+ * The whole subway as one source. 445 points in a single GeoJSON source costs
+ * one upload and no DOM at all, where 445 `Marker`s would be 445 absolutely
+ * positioned elements repositioned on every frame of every pan.
+ */
+export function stationsGeoJSON(stations: readonly Station[]): StationFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: stations.map((station) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [station.lng, station.lat] },
+      properties: { name: station.name, lines_label: station.lines.join(" ") },
+    })),
+  };
+}
+
 let cache: Promise<Station[]> | null = null;
 
 /**
