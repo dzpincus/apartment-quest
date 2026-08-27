@@ -222,12 +222,14 @@ function Row({
               <UnreadBadge count={unread} />
               <GoneBadge state={row.listing_state} note={row.state_note} listing={row} />
             </span>
-            {/* Unit and the way into the photos share the second line: the
-                button says "Gallery · 8" rather than relying on a thumbnail
-                to advertise itself, and it only exists when there is
-                something to open. `InlineEdit` is `w-full` by its own
-                stylesheet, so it gets the flexible half and the button the
-                fixed one. */}
+            {/* Unit and the way into the photos share the second line: a
+                labelled button rather than a thumbnail that has to advertise
+                itself, and it only exists when there is something to open.
+                The count lives in the `aria-label` only — printed in the
+                button it made the column ragged, one row saying "Gallery · 3"
+                next to one saying "Gallery · 12". `InlineEdit` is `w-full`
+                by its own stylesheet, so it gets the flexible half and the
+                button the fixed one. */}
             <span className="flex items-center gap-1.5">
               <span className="min-w-0 flex-1">
                 <InlineEdit
@@ -248,7 +250,7 @@ function Row({
                   aria-label={`Open ${photos} ${photos === 1 ? "photo" : "photos"} of ${row.address}`}
                 >
                   <Images />
-                  Gallery · {photos}
+                  Gallery
                 </Button>
               )}
             </span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextIndex, prevIndex, slidesToRender } from "./carousel";
+import { nextIndex, prevIndex, slidesToRender, visibleIndices } from "./carousel";
 
 /**
  * The card carousel is a scroll container with chrome on top, and the only
@@ -63,5 +63,46 @@ describe("slidesToRender", () => {
   it("is the same list either way for a single photo", () => {
     expect(slidesToRender(false, 1)).toEqual([0]);
     expect(slidesToRender(true, 1)).toEqual([0]);
+  });
+});
+
+describe("visibleIndices", () => {
+  it("keeps the current photo and both neighbours mounted", () => {
+    expect(visibleIndices(4, 9)).toEqual([3, 4, 5]);
+  });
+
+  it("drops the neighbour that does not exist at either end", () => {
+    // Clamped, not wrapped: photo 0 has no previous, so the window is two
+    // wide rather than three with index 0 repeated — the caller keys React
+    // elements off these.
+    expect(visibleIndices(0, 9)).toEqual([0, 1]);
+    expect(visibleIndices(8, 9)).toEqual([7, 8]);
+  });
+
+  it("is the single photo when that is all there is", () => {
+    expect(visibleIndices(0, 1)).toEqual([0]);
+    expect(visibleIndices(3, 1)).toEqual([0]);
+  });
+
+  it("has nothing to mount with no photos", () => {
+    expect(visibleIndices(0, 0)).toEqual([]);
+    expect(visibleIndices(2, -4)).toEqual([]);
+  });
+
+  it("clamps an index that walked off the array", () => {
+    expect(visibleIndices(99, 5)).toEqual([3, 4]);
+    expect(visibleIndices(-7, 5)).toEqual([0, 1]);
+    expect(visibleIndices(2.7, 5)).toEqual([1, 2, 3]);
+    expect(visibleIndices(Number.NaN, 5)).toEqual([0, 1]);
+  });
+
+  it("never returns a duplicate index", () => {
+    for (const count of [1, 2, 3, 8]) {
+      for (let i = 0; i < count; i++) {
+        const window = visibleIndices(i, count);
+        expect(new Set(window).size).toBe(window.length);
+        expect(window).toContain(i);
+      }
+    }
   });
 });

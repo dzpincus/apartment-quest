@@ -24,7 +24,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PhotoLightbox } from "@/components/listings/photo-lightbox";
 import { usePerson } from "@/lib/person";
 import { useMutations } from "@/lib/mutations";
-import { photoUrl } from "@/lib/photos-client";
+import { photoUrl, prefetchPhotos } from "@/lib/photos-client";
 import { listingLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ListingRow } from "@/lib/queries";
@@ -127,6 +127,12 @@ export function PhotoGallery({ listing }: { listing: ListingRow }) {
                       longPressed.current = false;
                       return; // the press that revealed the × must not also open it
                     }
+                    // The whole set, warmed at the tap rather than one
+                    // round trip per press of the right arrow. The thumbs
+                    // above are the 400px rendition, so nothing here is in
+                    // the cache yet. The lightbox warms it again on open —
+                    // this is the frame it can do it a frame earlier.
+                    prefetchPhotos(photos);
                     setLightbox(i);
                   }}
                   onPointerDown={() => startPress(photo.id)}

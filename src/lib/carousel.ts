@@ -47,3 +47,28 @@ export function slidesToRender(armed: boolean, count: number): number[] {
   if (!armed) return [0];
   return Array.from({ length: total }, (_, i) => i);
 }
+
+/**
+ * The three photos the lightbox keeps mounted: the one on screen and its two
+ * neighbours.
+ *
+ * Stepping is then a swap between `<img>` tags the browser has already
+ * decoded, rather than a fresh request with a blank stage in the middle of it.
+ * Clamped rather than wrapped, and de-duplicated by construction: at the first
+ * or last photo this is two indices, not three with a repeat, because the
+ * caller keys React elements off them and a repeated key is a warning at best.
+ *
+ * The lightbox's *stepping* still wraps — that is `(i + delta + n) % n` in the
+ * component. This is only the mounting window; the far end of a wrap is
+ * covered by `prefetchPhotos`, which warmed the whole set when the viewer
+ * opened.
+ */
+export function visibleIndices(current: number, count: number): number[] {
+  const total = Math.max(0, Math.trunc(count));
+  if (total === 0) return [];
+  // A non-finite index comes from arithmetic on an empty set somewhere
+  // upstream; showing the first photo beats rendering nothing at all.
+  const raw = Number.isFinite(current) ? Math.trunc(current) : 0;
+  const at = Math.max(0, Math.min(total - 1, raw));
+  return [at - 1, at, at + 1].filter((i) => i >= 0 && i < total);
+}
