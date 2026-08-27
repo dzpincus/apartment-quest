@@ -18,7 +18,14 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LngLatBounds, Map as MapLibreMap, Marker, type MapOptions } from "maplibre-gl";
+// Not `maplibre-gl` directly: that module sets the worker URL, which Turbopack
+// otherwise leaves empty. See `maplibre.ts`.
+import {
+  LngLatBounds,
+  MapLibreMap,
+  Marker,
+  type MapOptions,
+} from "@/components/map/maplibre";
 import { loadMapStyle, MAP_STYLE_FAILED_MESSAGE } from "@/components/map/map-style";
 import {
   applyListingPinState,
