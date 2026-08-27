@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   fullscreenElement,
   fullscreenSupported,
+  isFullscreenOn,
   type FullscreenDoc,
   type FullscreenElement,
 } from "./use-fullscreen";
@@ -65,5 +66,33 @@ describe("fullscreenElement", () => {
   it("prefers the standard property when both are present", () => {
     const other = { nodeName: "SPAN" } as unknown as Element;
     expect(fullscreenElement({ fullscreenElement: el, webkitFullscreenElement: other })).toBe(el);
+  });
+});
+
+describe("isFullscreenOn", () => {
+  const el = { nodeName: "DIV" } as unknown as Element;
+  const other = { nodeName: "SPAN" } as unknown as Element;
+
+  it("is false when nothing is full screen and the ref has not mounted", () => {
+    // The bug: `null === null` made the lightbox render its full-screen
+    // layout inside a shrink-wrapped dialog, which collapsed to nothing.
+    expect(isFullscreenOn(chrome, null)).toBe(false);
+    expect(isFullscreenOn({}, null)).toBe(false);
+    expect(isFullscreenOn(oldSafari, undefined)).toBe(false);
+    expect(isFullscreenOn(null, null)).toBe(false);
+  });
+
+  it("is true when the document has this very element", () => {
+    expect(isFullscreenOn({ fullscreenElement: el }, el)).toBe(true);
+    expect(isFullscreenOn({ webkitFullscreenElement: el }, el)).toBe(true);
+  });
+
+  it("is false when some other element is full screen", () => {
+    expect(isFullscreenOn({ fullscreenElement: other }, el)).toBe(false);
+    expect(isFullscreenOn({ webkitFullscreenElement: other }, el)).toBe(false);
+  });
+
+  it("is false when this element is mounted but nothing is full screen", () => {
+    expect(isFullscreenOn(chrome, el)).toBe(false);
   });
 });

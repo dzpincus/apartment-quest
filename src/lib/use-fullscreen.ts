@@ -74,6 +74,27 @@ export function fullscreenElement(doc: FullscreenDoc): Element | null {
   return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
 }
 
+/**
+ * Is `el` the element `doc` currently has full screen?
+ *
+ * The `el` null check is the whole function. `fullscreenElement` returns null
+ * when *nothing* is full screen, and `ref.current` is null until the element
+ * mounts — the lightbox's image box only exists while the dialog is open — so
+ * a bare `===` reads "nothing is full screen and nothing is mounted" as *yes,
+ * full screen*. That is a true `active` with no full-screen session behind it,
+ * and the lightbox answers it by laying its stage out as `size-full` inside a
+ * dialog that shrink-wraps its content: a 48x44 box with the photo gone.
+ *
+ * Null on either side is "no", so the value cannot start true.
+ */
+export function isFullscreenOn(
+  doc: FullscreenDoc | null | undefined,
+  el: Element | null | undefined,
+): boolean {
+  if (!doc || !el) return false;
+  return fullscreenElement(doc) === el;
+}
+
 function exitFullscreen(doc: FullscreenDoc): void {
   const exit = doc.exitFullscreen ?? doc.webkitExitFullscreen;
   if (typeof exit !== "function") return;
@@ -127,7 +148,12 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>): Fullscreen {
   const [active, setActive] = useState(false);
 
   useEffect(() => {
-    const sync = () => setActive(fullscreenElement(document) === ref.current);
+    // `sync` is safe to run before the element mounts: a null ref is not full
+    // screen, so the first read is false and stays false until the browser
+    // says otherwise. Nor is there a state it can miss by running early — an
+    // element cannot already be full screen at the moment it mounts, and every
+    // later transition arrives as `fullscreenchange`.
+    const sync = () => setActive(isFullscreenOn(document, ref.current));
     sync();
     document.addEventListener("fullscreenchange", sync);
     document.addEventListener("webkitfullscreenchange", sync);
@@ -168,7 +194,7 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>): Fullscreen {
   const exit = useCallback(() => exitFullscreen(document), []);
 
   const toggle = useCallback(() => {
-    if (fullscreenElement(document) === ref.current) {
+    if (isFullscreenOn(document, ref.current)) {
       exitFullscreen(document);
       return true;
     }
