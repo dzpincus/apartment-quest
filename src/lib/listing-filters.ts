@@ -24,14 +24,21 @@ import type {
  *
  * `unchecked` covers a null column as well as `unknown`: a pre-0006 row and a
  * row nobody has looked at are the same absence.
+ *
+ * `not_gone` is the default (see `EMPTY_FILTERS`), and it is the one value
+ * here that is *not* a narrowing: a listing the site has taken down is not an
+ * apartment anybody can rent, so the table opens on live + unchecked and says
+ * how many it is holding back. `any` is still one pick away, and — being a
+ * pick — it counts as an active filter and wears a chip, the same as `gone`.
  */
-export type LinkStateFilter = "all" | "live" | "gone" | "unchecked";
+export type LinkStateFilter = "any" | "not_gone" | "live" | "gone" | "unchecked";
 
 export function matchesLinkState(
   state: ListingState | null | undefined,
   filter: LinkStateFilter,
 ): boolean {
-  if (filter === "all") return true;
+  if (filter === "any") return true;
+  if (filter === "not_gone") return !isVanished({ listing_state: state ?? null });
   if (filter === "gone") return isVanished({ listing_state: state ?? null });
   if (filter === "live") return state === "active";
   return state == null || state === "unknown";
@@ -63,7 +70,9 @@ export const EMPTY_FILTERS: Filters = {
   bedsMin: "",
   neighborhood: "all",
   status: "all",
-  linkState: "all",
+  // Not "any": gone listings are hidden until somebody asks for them. See
+  // `LinkStateFilter` and `hiddenGoneCount`.
+  linkState: "not_gone",
   feeType: "all",
   pets: "all",
   laundry: "all",
@@ -97,6 +106,12 @@ export const FILTER_KEYS: ReadonlyArray<keyof Filters> = [
   "myVote",
 ];
 
+/**
+ * Note this is also what keeps the default `linkState` of `not_gone` out of
+ * the count and off the chip row: "active" means "not the default", and the
+ * default hiding gone listings is the table's resting state, not a filter
+ * somebody set.
+ */
 export function isFilterActive(f: Filters, key: keyof Filters): boolean {
   return f[key] !== EMPTY_FILTERS[key];
 }
@@ -267,6 +282,25 @@ export function applyFilters(
     if (!matchesMyVote(r.votes, personId, f.myVote)) return false;
     return true;
   });
+}
+
+/**
+ * How many rows the default `not_gone` is holding back — the "3 gone hidden ·
+ * show" line in the toolbar.
+ *
+ * Every *other* filter still applies, so the number always matches what the
+ * list would grow by if you flipped this one control: a rent cap that already
+ * excludes a vanished listing does not get to advertise it. Zero for every
+ * other `linkState`, including `any` — nothing is hidden once you have asked
+ * to see it, and `gone` is showing you exactly those rows.
+ */
+export function hiddenGoneCount(
+  rows: ListingRow[],
+  f: Filters,
+  personId: Uuid | null = null,
+): number {
+  if (f.linkState !== "not_gone") return 0;
+  return applyFilters(rows, { ...f, linkState: "gone" }, personId).length;
 }
 
 function sortValue(

@@ -128,9 +128,10 @@ type SelectField = {
   options: ReadonlyArray<SelectOption<string>>;
   inlineClassName: string;
   /**
-   * What the *chip* says, when the option's own label is too long for one.
-   * "Link: gone" is the right thing to read in a list of controls next to
-   * "Any status"; on a 7px-tall pill under the filter row it is just "Gone".
+   * What the *chip* says, when the option's own label does not fit one.
+   * "Link: live + unchecked" is the right thing to read in a list of controls
+   * next to "Any status"; on a pill under the filter row it is "Link: Live +
+   * unchecked", and only ever for a value somebody picked.
    */
   chips?: Record<string, string>;
 };
@@ -240,6 +241,7 @@ export function ListingsToolbar({
   onSortChange,
   neighborhoodOptions,
   count,
+  hiddenGone = 0,
   view,
   onViewChange,
 }: {
@@ -249,6 +251,12 @@ export function ListingsToolbar({
   onSortChange: (sort: Sort) => void;
   neighborhoodOptions: string[];
   count: number;
+  /**
+   * How many rows the default `linkState` is keeping out of `count` — see
+   * `hiddenGoneCount`. Anything above zero draws the "n gone hidden · show"
+   * line, so the number under the title is never quietly short.
+   */
+  hiddenGone?: number;
   /** List or map. Persisted per device in `prefs.ts`, not in the URL. */
   view: ListingsView;
   onViewChange: (view: ListingsView) => void;
@@ -284,6 +292,10 @@ export function ListingsToolbar({
           <h1 className="text-[26px] leading-tight md:text-2xl">Listings</h1>
           <span className="text-sm text-muted-foreground tabular-nums">{count}</span>
         </div>
+        <HiddenGoneHint
+          hiddenGone={hiddenGone}
+          onShow={() => onFiltersChange({ ...filters, linkState: "any" })}
+        />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {/* On a phone this control lives in the filter row below, next to
               the other two things that change what you are looking at. */}
@@ -380,6 +392,38 @@ export function ListingsToolbar({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * "3 gone hidden · show" — the receipt for the default `linkState`.
+ *
+ * A count on its own would just be a number nobody asked for, so the word next
+ * to it is the control that undoes it: one tap widens the filter to `any` and
+ * the line disappears, because there is nothing hidden any more. Nothing
+ * renders at zero, which is the common case once the sync has been round.
+ */
+function HiddenGoneHint({
+  hiddenGone,
+  onShow,
+}: {
+  hiddenGone: number;
+  onShow: () => void;
+}) {
+  if (hiddenGone <= 0) return null;
+  return (
+    <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+      <span className="tabular-nums">{hiddenGone} gone hidden</span>
+      <span aria-hidden>·</span>
+      <button
+        type="button"
+        onClick={onShow}
+        aria-label={`Show ${hiddenGone} hidden gone ${hiddenGone === 1 ? "listing" : "listings"}`}
+        className="font-extrabold underline underline-offset-2 hover:text-foreground"
+      >
+        show
+      </button>
+    </p>
   );
 }
 

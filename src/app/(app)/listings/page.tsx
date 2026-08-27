@@ -13,6 +13,7 @@ import { useListingsView, usePrimaryLocationId } from "@/lib/prefs";
 import {
   applyFilters,
   EMPTY_FILTERS,
+  hiddenGoneCount,
   neighborhoods,
   sortRows,
   type Filters,
@@ -59,6 +60,13 @@ export default function ListingsPage() {
       ),
     [listings, filters, sort, person?.id, primaryLocationId],
   );
+  // What the default link-state filter is holding back, counted against every
+  // *other* filter — the toolbar's "n gone hidden · show". Zero the moment
+  // somebody picks any other link state.
+  const hiddenGone = useMemo(
+    () => hiddenGoneCount(listings, filters, person?.id ?? null),
+    [listings, filters, person?.id],
+  );
 
   return (
     // `min-w-0`: the toolbar and the cards below are the two things on this
@@ -71,6 +79,7 @@ export default function ListingsPage() {
         onSortChange={setSort}
         neighborhoodOptions={hoods}
         count={rows.length}
+        hiddenGone={hiddenGone}
         view={view}
         onViewChange={setView}
       />

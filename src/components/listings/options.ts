@@ -91,21 +91,34 @@ export const OUTDOOR_FILTER_OPTIONS: SelectOption<OutdoorSpacePolicy | "all">[] 
 /**
  * The link-state filter (0006). Every label says "Link:" out loud, because the
  * control sits next to "Any status" and the two answer different questions —
- * where *we* are versus what the *site* says. The chips use `LINK_STATE_CHIPS`
- * instead: by then the row is one word wide and the prefix is noise.
+ * where *we* are versus what the *site* says.
+ *
+ * `not_gone` leads because it is the default: the table opens on live +
+ * unchecked and keeps taken-down listings out of the way. "Link: any" is the
+ * one below it, and unlike the others it *widens* the list, which is why it
+ * still gets a chip.
  */
 export const LINK_STATE_FILTER_OPTIONS: SelectOption<LinkStateFilter>[] = [
-  { value: "all", label: "Link: any" },
+  { value: "not_gone", label: "Link: live + unchecked" },
+  { value: "any", label: "Link: any" },
   { value: "live", label: "Link: live" },
   { value: "gone", label: "Link: gone" },
   { value: "unchecked", label: "Link: unchecked" },
 ];
 
+/**
+ * What the chips say. The prefix stays on: a pill reading just "Any" next to
+ * one reading "Contacted" is a filter nobody can place, and every value here
+ * is a *departure* from the default worth naming out loud. `not_gone` is the
+ * default and so never wears a chip — the entry is here because the record is
+ * total.
+ */
 export const LINK_STATE_CHIPS: Record<LinkStateFilter, string> = {
-  all: "Link: any",
-  live: "Live",
-  gone: "Gone",
-  unchecked: "Unchecked",
+  not_gone: "Link: Live + unchecked",
+  any: "Link: Any",
+  live: "Link: Live",
+  gone: "Link: Gone",
+  unchecked: "Link: Unchecked",
 };
 
 /** `guarantor_ok` is a nullable boolean; the UI treats null as "unknown". */

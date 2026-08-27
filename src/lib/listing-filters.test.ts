@@ -8,6 +8,7 @@ import {
   EMPTY_FILTERS,
   FILTER_KEYS,
   hasActiveFilters,
+  hiddenGoneCount,
   matchesLinkState,
   neighborhoods,
   sortRows,
@@ -83,6 +84,7 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
       { bedsMin: "2" },
       { neighborhood: "Bushwick" },
       { status: "contacted" },
+      { linkState: "any" },
       { linkState: "gone" },
       { linkState: "unchecked" },
       { feeType: "no_fee" },
@@ -101,13 +103,13 @@ describe("EMPTY_FILTERS / hasActiveFilters", () => {
     }
   });
 
-  it("does not treat the 'all' sentinels or empty strings as active", () => {
+  it("does not treat the defaults — 'all', 'not_gone', empty strings — as active", () => {
     expect(
       hasActiveFilters(
         filters({
           neighborhood: "all",
           status: "all",
-          linkState: "all",
+          linkState: "not_gone",
           feeType: "all",
           pets: "all",
           laundry: "all",
@@ -177,6 +179,19 @@ describe("activeFilterCount / clearFilter", () => {
     expect(activeFilterCount(after)).toBe(2);
     // Pure: the caller's object is untouched.
     expect(before.pets).toBe("yes");
+  });
+
+  it("clears the link state back to 'not_gone', not 'any'", () => {
+    expect(EMPTY_FILTERS.linkState).toBe("not_gone");
+    expect(clearFilter(filters({ linkState: "any" }), "linkState").linkState).toBe(
+      "not_gone",
+    );
+    expect(clearFilter(filters({ linkState: "gone" }), "linkState").linkState).toBe(
+      "not_gone",
+    );
+    // ...and so does "Clear all", which is `EMPTY_FILTERS` wholesale.
+    expect(activeFilterCount(filters({ linkState: "any", pets: "yes" }))).toBe(2);
+    expect(activeFilterCount(EMPTY_FILTERS)).toBe(0);
   });
 
   it("clearing every active field lands back on the defaults", () => {
@@ -818,9 +833,30 @@ describe("sortRows — transitToPrimary", () => {
 });
 
 describe("matchesLinkState — what the SITE says, not what we decided", () => {
-  it("lets everything past on the default", () => {
+  it("lets everything past on 'any'", () => {
     for (const state of ["active", "off_market", "removed", "unknown", null] as const) {
-      expect(matchesLinkState(state, "all")).toBe(true);
+      expect(matchesLinkState(state, "any")).toBe(true);
+    }
+  });
+
+  it("keeps live and unchecked, drops gone, on the 'not_gone' default", () => {
+    for (const state of ["active", "unknown", null, undefined] as const) {
+      expect(matchesLinkState(state, "not_gone")).toBe(true);
+    }
+    expect(matchesLinkState("off_market", "not_gone")).toBe(false);
+    expect(matchesLinkState("removed", "not_gone")).toBe(false);
+  });
+
+  it("is the exact complement of 'gone' — every state lands in one or the other", () => {
+    for (const state of [
+      "active",
+      "off_market",
+      "removed",
+      "unknown",
+      null,
+      undefined,
+    ] as const) {
+      expect(matchesLinkState(state, "not_gone")).toBe(!matchesLinkState(state, "gone"));
     }
   });
 
@@ -856,8 +892,12 @@ describe("applyFilters — link state", () => {
     row({ id: "never", listing_state: null }),
   ];
 
-  it("keeps everything by default", () => {
-    expect(ids(applyFilters(rows, EMPTY_FILTERS))).toEqual([
+  it("hides the gone ones by default and keeps live + unchecked", () => {
+    expect(ids(applyFilters(rows, EMPTY_FILTERS))).toEqual(["live", "shrug", "never"]);
+  });
+
+  it("keeps everything on an explicit 'any'", () => {
+    expect(ids(applyFilters(rows, filters({ linkState: "any" })))).toEqual([
       "live",
       "gone",
       "404",
@@ -890,5 +930,49 @@ describe("applyFilters — link state", () => {
     expect(
       ids(applyFilters(mixed, filters({ status: "contacted", linkState: "gone" }))),
     ).toEqual(["a"]);
+  });
+});
+
+describe("hiddenGoneCount — the \"n gone hidden\" line", () => {
+  const rows = [
+    row({ id: "live", listing_state: "active", rent: 2000 }),
+    row({ id: "gone", listing_state: "off_market", rent: 2000 }),
+    row({ id: "404", listing_state: "removed", rent: 9000 }),
+    row({ id: "never", listing_state: null, rent: 2000 }),
+  ];
+
+  it("counts what the default is holding back", () => {
+    expect(hiddenGoneCount(rows, EMPTY_FILTERS)).toBe(2);
+  });
+
+  it("is zero when nothing vanished", () => {
+    expect(hiddenGoneCount([rows[0], rows[3]], EMPTY_FILTERS)).toBe(0);
+    expect(hiddenGoneCount([], EMPTY_FILTERS)).toBe(0);
+  });
+
+  it("obeys the other filters — a row already excluded is not 'hidden'", () => {
+    // The $9k one is out on rent whatever the link state says, so flipping to
+    // "any" would only add the other one.
+    expect(hiddenGoneCount(rows, filters({ rentMax: "3000" }))).toBe(1);
+  });
+
+  it("matches what flipping the control would actually add", () => {
+    const shown = applyFilters(rows, EMPTY_FILTERS).length;
+    const all = applyFilters(rows, filters({ linkState: "any" })).length;
+    expect(hiddenGoneCount(rows, EMPTY_FILTERS)).toBe(all - shown);
+  });
+
+  it("is zero for every other link state — nothing is hidden once you asked", () => {
+    for (const linkState of ["any", "live", "gone", "unchecked"] as const) {
+      expect(hiddenGoneCount(rows, filters({ linkState }))).toBe(0);
+    }
+  });
+
+  it("resolves 'my vote' against the same person the list does", () => {
+    const voted = [
+      row({ id: "mine", listing_state: "off_market", votes: [vote(ME, "yes")] }),
+      row({ id: "theirs", listing_state: "off_market", votes: [vote(THEM, "yes")] }),
+    ];
+    expect(hiddenGoneCount(voted, filters({ myVote: "yes" }), ME)).toBe(1);
   });
 });
