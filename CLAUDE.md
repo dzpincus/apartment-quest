@@ -236,7 +236,8 @@ shortcut.
 
 Pictures of a listing come from two places — copied off the source site during
 a URL import, and uploaded from a phone after a tour — and both go through
-`POST /api/photos`.
+`POST /api/photos`. A third door, `POST /api/photos/refresh`, is the first kind
+again, later: the site published more of them after we imported it.
 
 The wire shape (`SavePhotosResponse`, `PhotoFailure`) lives in
 `src/lib/photo-types.ts` — no `server-only`, imported by the route and by both
@@ -340,6 +341,45 @@ publication and maps to the `listings` / `listing(id)` keys, which is what
 makes an import feel live:
 the dialog navigates away while the route is still working and thumbnails
 appear one by one.
+
+**Sites add photos after we import them, so we go back.** `POST
+/api/photos/refresh` `{ listingId, personId? }` re-fetches the listing page,
+runs the same `discoverPhotos` over it, and copies across only what we do not
+already hold — reply `{ discovered, added, skipped_existing, failed, blocked }`.
+Two doors (`src/lib/api-auth.ts`: the session, or `Authorization: Bearer
+$CRON_SECRET`), `maxDuration = 120` for the ladder plus twelve images, and it
+is in `BEARER_ROUTES`. Discovery is capped at **40**, not the import's 12: the
+photos we already have are at the *front* of the page, so a 12-deep look would
+hand back exactly those and every refresh would find nothing. **12 new per
+run**, and 60 across a whole `/api/sync` invocation.
+
+**The identity of a photo is computed, never stored.** `photoSourceKey`
+(`src/lib/import/photo-key.ts`, pure and tested) turns a URL into the key two
+renditions of one picture share — Zillow states it outright
+(`/fp/<hash>-<variant>.<ext>` → `zillow:<hash>`), StreetEasy and CloudFront put
+it in the filename with the size beside it (`<host>:<filename minus
+-large/-medium/_1024x768/-w800>`), everything else is `<host><pathname>`
+lower-cased with the query gone. It is computed on **both** sides at compare
+time, from `listing_photos.source_url`; there is no new column, because a
+stored key goes stale the day a site changes its URL shape — and this one will.
+`pickNewPhotos(candidates, existingSourceUrls)` (`src/lib/photo-resync.ts`,
+pure and tested) is the whole decision, and its three counters always add up to
+the candidates it was given. **A manual upload has a null `source_url` and
+therefore no key**: a photo off somebody's phone is not a rendition of anything
+and can never make a page's picture look like a duplicate.
+
+The work itself is `syncListingPhotos` (`src/lib/photos-sync.ts`), which shares
+every byte of the encode/upload/insert path with `POST /api/photos` — both call
+`storePhotos` in `src/lib/photos-server.ts`, where the decode-bomb guard, the
+objects-then-rows ordering and the rollback-on-insert-failure live. `added_by`
+is the caller or **null** (Quest Bot has never been on a tour and does not own
+a photo row), while the `added_photos` line — "added 3 new photos to 214 Grand
+St #4B", written only when N > 0 — is signed by the caller or, on a crawl, by
+Quest Bot, because `activity.person_id` is NOT NULL. On screen it is a
+**Refresh photos** button in `PhotoGallery`, rendered only for a listing that
+has a `url`, and it says "3 new photos" / "Nothing new" / "Site wouldn't let us
+look". Nothing new is the *expected* answer and is reported as a success: the
+dedupe working is the feature.
 
 ## Sync
 
@@ -464,6 +504,19 @@ check behind it plus room for the writes — `300s − (8s fetch + 82s Firecrawl
 at a 15s Firecrawl timeout and became a killed function the moment rung two grew
 a 40s timeout and a retry. Change any of those three timeouts and the budget
 moves with them.
+
+**The run picks the photos up on the way past.** The page has already been
+fetched to decide whether the apartment is still being let, so a listing that
+came back `active` hands that same HTML to `syncListingPhotos` — no second
+fetch of somebody's listing page in one invocation. It is skipped for a block,
+an error and anything not `active` (a dead page publishes nothing worth
+copying), it is wrapped in its own `try` so a photo CDN having a bad afternoon
+cannot cost a listing its state write, and it has three budgets: 12 new photos
+per listing, **60 across the run**, and its own wall clock (`PHOTO_BUDGET_MS`,
+i.e. `maxDuration` minus a worst-case pickup and the writes) checked before
+each one, because this happens in the tail of a 300s function. Each listing
+that gained any logs `[sync] photos +N`, and the `[sync] done` line carries the
+run's total. See CLAUDE.md → Photos for the dedupe.
 
 **Quest Bot** (`people.key = 'bot'`, 0006) exists because `activity.person_id`
 is NOT NULL. It signs the `listing_state_changed` rows ("noticed 214 Grand St
@@ -626,9 +679,9 @@ that costs nothing and needs no key. Missing key → 503 `{ disabled: true }`.
 
 **Both routes have two doors**, factored into `src/lib/api-auth.ts` from the
 sync route: the logged-in session, or `Authorization: Bearer $CRON_SECRET`
-compared in constant time. `src/lib/supabase/middleware.ts` lets all three past
-its signed-out guard (`BEARER_ROUTES`) so a terminal can backfill without a
-browser:
+compared in constant time. `src/lib/supabase/middleware.ts` lets all four bearer
+routes past its signed-out guard (`BEARER_ROUTES` — these two, `/api/sync` and
+`/api/photos/refresh`) so a terminal can backfill without a browser:
 
 ```bash
 curl -sS -X POST http://localhost:3000/api/geocode \

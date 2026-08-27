@@ -16,7 +16,12 @@ function apiUnauthorized(error: string) {
 }
 
 /** See `isCron` below: routes that carry their own constant-time bearer check. */
-const BEARER_ROUTES = new Set(["/api/sync", "/api/geocode", "/api/commutes"]);
+const BEARER_ROUTES = new Set([
+  "/api/sync",
+  "/api/geocode",
+  "/api/commutes",
+  "/api/photos/refresh",
+]);
 
 /**
  * Refreshes the auth session cookie and guards routes.
@@ -33,10 +38,11 @@ export async function updateSession(request: NextRequest) {
    * (`src/lib/api-auth.ts`), so nothing is unlocked here — the decision is
    * simply made one layer in.
    *
-   * `/api/sync` is pg_cron's. `/api/geocode` and `/api/commutes` are the same
-   * shape: a terminal holding the secret can backfill pins and commute times
-   * without a browser session, which is how they are tested and how a bulk
-   * re-geocode is run.
+   * `/api/sync` is pg_cron's. `/api/geocode`, `/api/commutes` and
+   * `/api/photos/refresh` are the same shape: a terminal holding the secret can
+   * backfill pins, commute times and newly published listing photos without a
+   * browser session, which is how they are tested and how a bulk re-geocode is
+   * run.
    */
   const isCron = BEARER_ROUTES.has(request.nextUrl.pathname);
 

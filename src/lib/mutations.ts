@@ -23,7 +23,11 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys, type ListingRow, type VoteRow } from "@/lib/queries";
 import { resizeImage, webpName } from "@/lib/images";
-import { BATCH_TOO_BIG_MESSAGE, type SavePhotosResponse } from "@/lib/photo-types";
+import {
+  BATCH_TOO_BIG_MESSAGE,
+  type RefreshPhotosResponse,
+  type SavePhotosResponse,
+} from "@/lib/photo-types";
 import { LINK_STATE_LABELS, listingLabel, STATUS_LABELS } from "@/lib/format";
 import type { SyncResponse } from "@/lib/sync-types";
 import type {
@@ -758,12 +762,13 @@ export async function updateBroker(
 
 // -- photos ------------------------------------------------------------------
 //
-// The two photo writes go over `POST`/`DELETE /api/photos` rather than through
-// supabase-js, because `sharp` and the storage paths live server-side. They are
-// still exported from here: "all writes go through mutations.ts" is about where
-// a component looks for a write, not about which transport it uses. The route
-// writes the `added_photos` activity row itself, since it is the only thing
-// that knows how many photos actually survived the trip.
+// The three photo writes go over `POST`/`DELETE /api/photos` and
+// `POST /api/photos/refresh` rather than through supabase-js, because `sharp`,
+// the storage paths and the fetch ladder all live server-side. They are still
+// exported from here: "all writes go through mutations.ts" is about where a
+// component looks for a write, not about which transport it uses. The routes
+// write the `added_photos` activity row themselves, since they are the only
+// thing that knows how many photos actually survived the trip.
 
 /**
  * Upload files from a device. Each is shrunk in the browser first — a phone on
@@ -800,6 +805,33 @@ export async function uploadPhotos(
     throw new Error(body?.error ?? "Couldn't add those photos.");
   }
   return { photos: body.photos ?? [], failed: body.failed ?? [], error: body.error };
+}
+
+/**
+ * Go back to the listing page and copy across whatever it has published since.
+ *
+ * A third transport-over-a-route write, same rule as the two above. Nothing is
+ * sent but the listing: the route holds the ladder, the dedupe and the cap, so
+ * a double-tapped button cannot ask for more than one page fetch's worth of
+ * work, and it can never add a second copy of a photo we already have (see
+ * `photoSourceKey`).
+ */
+export async function refreshPhotos(
+  personId: Uuid | null,
+  listingId: Uuid,
+): Promise<RefreshPhotosResponse> {
+  const res = await fetch("/api/photos/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ listingId, personId: personId ?? null }),
+  });
+  const body = (await res.json().catch(() => null)) as RefreshPhotosResponse | null;
+  // A block is a 200 with `blocked: true` — the site refusing us is an answer,
+  // not a failure — so only a real non-200 throws.
+  if (!res.ok || !body) {
+    throw new Error(body?.error ?? "Couldn't check for new photos.");
+  }
+  return body;
 }
 
 /** Removes both objects and the row. No activity line — a deletion is not news. */
@@ -1388,6 +1420,50 @@ export function useMutations(personId: Uuid | undefined) {
     },
   });
 
+  /**
+   * **Refresh photos**, on the detail page's gallery. Owns its toast start to
+   * finish for the same reason "Check now" does: it is a fetch of somebody
+   * else's website and can take ten seconds. "Nothing new" is the *expected*
+   * answer and is reported as a success, not as a shrug — the dedupe working
+   * is the feature.
+   */
+  const refreshListingPhotos = useMutation<
+    RefreshPhotosResponse,
+    unknown,
+    { listingId: Uuid },
+    { toastId: string | number }
+  >({
+    mutationFn: (vars) => refreshPhotos(personId ?? null, vars.listingId),
+    onMutate: () => ({ toastId: toast.loading("Looking for new photos…") }),
+    onSuccess: (result, vars, ctx) => {
+      if (result.disabled) {
+        toast.error("Photos aren't configured on this deployment.", { id: ctx?.toastId });
+      } else if (result.blocked) {
+        toast.error("Site wouldn't let us look", {
+          id: ctx?.toastId,
+          description: result.error ?? undefined,
+        });
+      } else if (result.added > 0) {
+        toast.success(`${result.added} new ${result.added === 1 ? "photo" : "photos"}`, {
+          id: ctx?.toastId,
+          description:
+            result.failed > 0 ? `${result.failed} couldn't be copied.` : undefined,
+        });
+      } else {
+        toast.success("Nothing new", {
+          id: ctx?.toastId,
+          description: result.error ?? undefined,
+        });
+      }
+      if (result.added > 0) invalidateListings(vars.listingId);
+    },
+    onError: (error, _vars, ctx) => {
+      toast.error(field(error, "message") ?? "Couldn't check for new photos.", {
+        id: ctx?.toastId,
+      });
+    },
+  });
+
   const removePhoto = useMutation({
     mutationFn: (vars: { photoId: Uuid; listingId: Uuid }) => deletePhoto(vars.photoId),
     onSuccess: (_data, vars) => {
@@ -1585,6 +1661,7 @@ export function useMutations(personId: Uuid | undefined) {
     castVote: vote,
     clearVote: dropVote,
     uploadPhotos: addPhotos,
+    refreshPhotos: refreshListingPhotos,
     deletePhoto: removePhoto,
     createBroker: addBroker,
     updateBroker: editBroker,

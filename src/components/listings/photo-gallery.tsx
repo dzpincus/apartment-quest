@@ -18,7 +18,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Image as ImageIcon, Loader2, Plus, X } from "lucide-react";
+import { Image as ImageIcon, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PhotoLightbox } from "@/components/listings/photo-lightbox";
@@ -34,7 +34,7 @@ const LONG_PRESS_MS = 500;
 
 export function PhotoGallery({ listing }: { listing: ListingRow }) {
   const { person } = usePerson();
-  const { uploadPhotos, deletePhoto } = useMutations(person?.id);
+  const { uploadPhotos, refreshPhotos, deletePhoto } = useMutations(person?.id);
   const inputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -46,6 +46,7 @@ export function PhotoGallery({ listing }: { listing: ListingRow }) {
   const photos = listing.photos ?? [];
   const label = listingLabel(listing.address, listing.unit);
   const uploading = uploadPhotos.isPending;
+  const refreshing = refreshPhotos.isPending;
 
   function onPick(event: React.ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
@@ -77,10 +78,26 @@ export function PhotoGallery({ listing }: { listing: ListingRow }) {
           <p className="text-sm font-extrabold">
             Photos{photos.length > 0 ? ` (${photos.length})` : ""}
           </p>
+          {/* Only for a listing that came from somewhere: a hand-typed row has
+              no page to go back to, and a button that can only ever say "that
+              listing has no link" is a button nobody should be offered. */}
+          {listing.url ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="ml-auto"
+              disabled={refreshing}
+              onClick={() => refreshPhotos.mutate({ listingId: listing.id })}
+            >
+              {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              {refreshing ? "Looking…" : "Refresh photos"}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
-            className="ml-auto"
+            className={listing.url ? undefined : "ml-auto"}
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
           >

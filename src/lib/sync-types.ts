@@ -115,6 +115,34 @@ export function isBlockedNote(note: string | null | undefined): boolean {
 }
 
 /**
+ * How long a site that walled us off stays exempt from the *paid* rung.
+ * Firecrawl's free tier is 500 credits and 60 listings twice a day would eat
+ * it in four days; a site that blocks us today will block us tomorrow.
+ */
+export const BLOCK_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Has this site walled us off recently? `state_note` carries the answer
+ * (`blocked — …`) and `state_checked_at` carries when.
+ *
+ * Shared by the two things that climb the ladder on a schedule — `/api/sync`
+ * and the photo re-sync in `photos-sync.ts` — because a cooldown enforced in
+ * one of them and not the other is the same 500 credits gone, just more
+ * slowly. A *manual* check is exempt: one credit, asked for on purpose, by
+ * somebody watching the button.
+ */
+export function recentlyBlocked(
+  note: string | null | undefined,
+  checkedAt: string | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!isBlockedNote(note)) return false;
+  const last = checkedAt ? Date.parse(checkedAt) : Number.NaN;
+  if (Number.isNaN(last)) return false;
+  return now - last < BLOCK_COOLDOWN_MS;
+}
+
+/**
  * The two notes a *person* writes, and the predicate that reads the first one
  * back. "Still live" is a correction to a robot, and the robot has to respect
  * it: `/api/sync` will not put a manually confirmed listing back in the

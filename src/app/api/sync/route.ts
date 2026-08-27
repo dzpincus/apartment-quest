@@ -42,7 +42,6 @@ import {
   CLASSIFY_CAP,
   classifyFetched,
   classifyWithModel,
-  isBlockedNote,
   needsModelConfirmation,
   transitionSummary,
   unconfirmedNote,
@@ -52,10 +51,14 @@ import {
   errorNote,
   isManuallyConfirmedNote,
   learnedNothing,
+  recentlyBlocked,
   type SyncChange,
   type SyncOutcome,
   type SyncResponse,
 } from "@/lib/sync-types";
+import { MAX_NEW_PHOTOS_PER_RUN, SYNC_PHOTO_BUDGET } from "@/lib/photo-resync";
+import { botPersonId } from "@/lib/photos-server";
+import { syncListingPhotos } from "@/lib/photos-sync";
 import type { ListingState, Uuid } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -68,12 +71,6 @@ const SYNC_HOURS = new Set([0, 12]);
 /** One run's budget. Oldest checks first, so the rest are next run's problem. */
 const MAX_PER_RUN = 60;
 const CONCURRENCY = 3;
-/**
- * How long a site that walled us off stays exempt from the *paid* rung.
- * Firecrawl's free tier is 500 credits and 60 listings twice a day would eat
- * it in four days; a site that blocks us today will block us tomorrow.
- */
-const BLOCK_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000;
 /**
  * The worst one check can cost: a direct fetch that times out, then two
  * Firecrawl attempts and the pause between them, then a model call. ~110s.
@@ -96,6 +93,15 @@ const WRITE_HEADROOM_MS = 10_000;
  */
 const RUN_BUDGET_MS = MAX_DURATION_MS - WORST_CHECK_MS - WRITE_HEADROOM_MS;
 
+/**
+ * The photo pickup's own worst case: twelve images at a 6s timeout, four at a
+ * time, plus two uploads each. It runs *after* the pool, on a clock that is
+ * already most of the way through 300s, so it gets its own deadline — a run
+ * that came back late writes its states and skips the pictures entirely.
+ */
+const PHOTO_WORST_MS = 30_000;
+const PHOTO_BUDGET_MS = MAX_DURATION_MS - PHOTO_WORST_MS - WRITE_HEADROOM_MS;
+
 /** The columns a check reads. */
 type Candidate = {
   id: Uuid;
@@ -112,6 +118,18 @@ type Candidate = {
  * pure "may this overwrite `listing_state`?" decision lives beside it).
  */
 type Outcome = SyncOutcome;
+
+/**
+ * The outcome *and* the page it was decided from.
+ *
+ * The HTML is carried out of `inspect` for one reason: the photo re-sync needs
+ * exactly the page this run has already paid for. Fetching somebody's listing
+ * page twice in one invocation — once to ask whether the apartment is still
+ * being let and once to ask what it looks like — is both rude and 8 seconds we
+ * do not have. It is absent for a 404 (nothing was fetched) and for a block
+ * (nothing was allowed).
+ */
+type Checked = { outcome: Outcome; html?: string };
 
 export async function POST(request: Request): Promise<NextResponse<SyncResponse>> {
   const started = Date.now();
@@ -172,7 +190,7 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
   // in the run costs one check rather than the whole invocation's response.
   const outcomes = await pool(candidates, CONCURRENCY, (row) =>
     Date.now() - started > RUN_BUDGET_MS
-      ? Promise.resolve<Outcome>({ kind: "skipped" })
+      ? Promise.resolve<Checked>({ outcome: { kind: "skipped" } })
       : inspect(row, { manual: Boolean(listingId) }),
   );
 
@@ -181,9 +199,11 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
   let errors = 0;
   let skippedDeadline = 0;
   let botId: Uuid | null | undefined;
+  let photosAdded = 0;
   let checkedListing: SyncResponse["checkedListing"];
 
-  for (const [i, outcome] of outcomes.entries()) {
+  for (const [i, checked] of outcomes.entries()) {
+    const { outcome, html } = checked;
     const row = candidates[i] as Candidate;
     const before: ListingState = row.listing_state ?? "unknown";
 
@@ -225,6 +245,43 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
       if (outcome.kind !== "error") errors += 1;
       console.error("[sync] write failed", { id: row.id, error: writeError.message });
       continue;
+    }
+
+    // --- The pictures, from the page we have already got.
+    //
+    // Only for a listing the site is still letting: a page that has gone
+    // `off_market` publishes nothing worth copying, and a blocked or errored
+    // check has no HTML at all. Three budgets guard it — the wall clock, 60
+    // new photos across the whole run, and twelve per listing — because this
+    // is the tail of a 300s function and a broker who uploaded thirty photos
+    // must not cost the other 59 listings their state write.
+    //
+    // Wrapped, always: the sync's job is `listing_state`, and a photo CDN
+    // having a bad afternoon is not allowed to have an opinion about that.
+    if (
+      outcome.kind === "state" &&
+      html &&
+      (nothingLearned ? before : outcome.state) === "active" &&
+      photosAdded < SYNC_PHOTO_BUDGET &&
+      Date.now() - started < PHOTO_BUDGET_MS
+    ) {
+      try {
+        const photos = await syncListingPhotos({
+          admin,
+          listingId: row.id,
+          url: row.url,
+          html,
+          // No `personId`: the crawl is Quest Bot's, and the rows it writes
+          // have no `added_by` at all — nobody was on a tour.
+          cap: Math.min(MAX_NEW_PHOTOS_PER_RUN, SYNC_PHOTO_BUDGET - photosAdded),
+        });
+        if (photos.added > 0) {
+          photosAdded += photos.added;
+          console.info(`[sync] photos +${photos.added}`, { id: row.id });
+        }
+      } catch (error) {
+        console.error("[sync] photo resync failed", { id: row.id, error: message(error) });
+      }
     }
 
     // A failed check has nothing to report to "Check now" beyond the failure;
@@ -286,6 +343,7 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
     blocked,
     errors,
     skippedDeadline,
+    photos: photosAdded,
     ms: Date.now() - started,
   });
   return json(response);
@@ -301,59 +359,70 @@ export async function POST(request: Request): Promise<NextResponse<SyncResponse>
 async function inspect(
   row: Candidate,
   opts: { manual: boolean } = { manual: false },
-): Promise<Outcome> {
+): Promise<Checked> {
   const url = row.url;
   let direct;
   try {
     direct = await fetchPage(url);
   } catch (error) {
     // An unsafe or unresolvable URL: a stored link, not a request we make.
-    return { kind: "error", message: message(error) };
+    return { outcome: { kind: "error", message: message(error) } };
   }
 
   if (direct.ok) {
-    return decide(
-      {
-        status: direct.status,
-        finalUrl: direct.finalUrl,
-        originalUrl: url,
-        html: direct.html,
-      },
-      row,
-    );
+    return {
+      outcome: await decide(
+        {
+          status: direct.status,
+          finalUrl: direct.finalUrl,
+          originalUrl: url,
+          html: direct.html,
+        },
+        row,
+      ),
+      html: direct.html,
+    };
   }
 
   // A 404 is an answer, not a wall.
   if (direct.status === 404 || direct.status === 410) {
-    return decide({ status: direct.status, finalUrl: url, originalUrl: url }, row);
+    return {
+      outcome: await decide({ status: direct.status, finalUrl: url, originalUrl: url }, row),
+    };
   }
 
   // The cooldown is about not burning 500 free credits on a nightly crawl. A
   // person who pressed "Check now" is one credit and is asking on purpose, so
   // the paid rung is always open to them.
-  if (firecrawlEnabled() && (opts.manual || !recentlyBlocked(row))) {
+  if (
+    firecrawlEnabled() &&
+    (opts.manual || !recentlyBlocked(row.state_note, row.state_checked_at))
+  ) {
     let scraped;
     try {
       scraped = await scrapeWithFirecrawl(url);
     } catch (error) {
-      return { kind: "error", message: message(error) };
+      return { outcome: { kind: "error", message: message(error) } };
     }
     if (scraped.ok) {
-      return decide(
-        {
-          status: 200,
-          finalUrl: scraped.finalUrl,
-          originalUrl: url,
-          html: scraped.html,
-          markdown: scraped.markdown,
-        },
-        row,
-      );
+      return {
+        outcome: await decide(
+          {
+            status: 200,
+            finalUrl: scraped.finalUrl,
+            originalUrl: url,
+            html: scraped.html,
+            markdown: scraped.markdown,
+          },
+          row,
+        ),
+        html: scraped.html || undefined,
+      };
     }
-    return { kind: "blocked", note: blockedNote(scraped.reason) };
+    return { outcome: { kind: "blocked", note: blockedNote(scraped.reason) } };
   }
 
-  return { kind: "blocked", note: blockedNote(direct.reason) };
+  return { outcome: { kind: "blocked", note: blockedNote(direct.reason) } };
 }
 
 type Page = {
@@ -440,18 +509,6 @@ function promptFor(page: Page): string {
     : (page.markdown ?? "").slice(0, CLASSIFY_CAP);
 }
 
-/**
- * Has this site walled us off recently? `state_note` carries the answer
- * (`blocked — …`, written by `blockedNote`) and `state_checked_at` carries
- * when. Three days of not paying Firecrawl to be told no again.
- */
-function recentlyBlocked(row: Candidate): boolean {
-  if (!isBlockedNote(row.state_note)) return false;
-  const last = row.state_checked_at ? Date.parse(row.state_checked_at) : Number.NaN;
-  if (Number.isNaN(last)) return false;
-  return Date.now() - last < BLOCK_COOLDOWN_MS;
-}
-
 // -- auth ---------------------------------------------------------------------
 
 /**
@@ -471,25 +528,6 @@ async function authorized(request: Request, listingId: string): Promise<boolean>
 }
 
 // -- helpers ------------------------------------------------------------------
-
-/** `activity.person_id` is NOT NULL; Quest Bot is the row 0006 inserts. */
-async function botPersonId(
-  admin: ReturnType<typeof createAdminClient>,
-): Promise<Uuid | null> {
-  const { data, error } = await admin
-    .from("people")
-    .select("id")
-    .eq("key", "bot")
-    .maybeSingle();
-  if (error) {
-    console.error("[sync] bot lookup failed", error);
-    return null;
-  }
-  // No bot row means 0006 has not been applied here. The states still get
-  // written; only the feed line is skipped.
-  if (!data) console.error("[sync] no 'bot' person — apply 0006_listing_sync.sql");
-  return (data?.id as Uuid | undefined) ?? null;
-}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

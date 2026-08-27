@@ -56,6 +56,7 @@ const PROTECTED = [
   "/api/commutes",
   "/api/import",
   "/api/photos",
+  "/api/photos/refresh",
 ];
 
 describe("isPublicAsset", () => {
