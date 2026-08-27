@@ -39,6 +39,8 @@ const TABLES = [
   "brokers",
   "people",
   "listing_photos",
+  "locations",
+  "commute_times",
 ] as const;
 type Table = (typeof TABLES)[number];
 
@@ -101,6 +103,24 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
       //
       // A DELETE under the default replica identity carries only the primary
       // key, so `listing_id` is absent and the table-wide key has to do.
+      const listingId = id(row, "listing_id");
+      return listingId
+        ? [queryKeys.listings, queryKeys.listing(listingId)]
+        : [queryKeys.listings];
+    }
+    case "locations":
+      // The saved places are their own list, read by the map's chip row and by
+      // the commute card. Adding one also fills a whole column of
+      // `commute_times`, but those arrive as their own events below.
+      return [queryKeys.locations];
+    case "commute_times": {
+      // Commute times are embedded in the listing row (`LISTING_SELECT`), so
+      // they have no key of their own — same shape as photos. This is what
+      // makes a batch run fill the card in live rather than after a refresh.
+      //
+      // A DELETE under the default replica identity carries only the primary
+      // key — which here is the whole of (listing_id, location_id, mode), so
+      // `listing_id` is present even then and the narrow key still works.
       const listingId = id(row, "listing_id");
       return listingId
         ? [queryKeys.listings, queryKeys.listing(listingId)]

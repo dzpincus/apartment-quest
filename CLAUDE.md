@@ -39,7 +39,8 @@ Server-only vars (never `NEXT_PUBLIC_`, never read from a client component):
 | `ANTHROPIC_API_KEY` | Listing import. Missing -> `/api/import` returns 503 `{disabled:true}` and the panel says import isn't configured. Nothing else breaks. |
 | `FIRECRAWL_API_KEY` | Optional. Rung two of the import ladder. Missing -> the ladder drops straight to the paste box. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Photos and sync. Read only by `src/lib/supabase/admin.ts` (which imports `server-only`). Missing -> `/api/photos` returns 500 and `/api/sync` returns 503 `{disabled:true}`; nothing else breaks. |
-| `CRON_SECRET` | Listing status sync. The bearer token pg_cron sends to `/api/sync`, compared in constant time. Missing -> every cron call is a 401; "Check now" still works, since that path uses the session. |
+| `CRON_SECRET` | Listing status sync. The bearer token pg_cron sends to `/api/sync`, compared in constant time. Missing -> every cron call is a 401; "Check now" still works, since that path uses the session. Also accepted by `/api/geocode` and `/api/commutes` (`src/lib/api-auth.ts`). |
+| `GOOGLE_MAPS_API_KEY` | Commute times. Google Routes API only, server-only. Missing -> `/api/commutes` returns 503 `{disabled:true}`, the commute cards show "—" and nothing else breaks. The map itself needs no key. |
 
 Missing env does not break `pnpm build` — Supabase clients only throw when
 constructed at runtime, and the import route reads its key inside the request.
@@ -77,6 +78,11 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   `dishwasher` / `ac` / `outdoor_space`, and `merge_listings` redefined a sixth
   time so all four survive a merge (`'unknown'` is an absence, the same `case`
   arm `pets` gets)
+- `supabase/migrations/0010_maps.sql` — `listings.lat` / `lng` /
+  `geocoded_at` / `geocode_note` and the partial `listings_geo` index, the
+  `locations` and `commute_times` tables (RLS + realtime), the two
+  `listings_address_changed` triggers, and `merge_listings` redefined a seventh
+  time (coordinates carried across, `commute_times` repointed)
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply in filename order via the Supabase SQL editor (paste + run) or the Supabase
@@ -84,8 +90,8 @@ MCP `apply_migration` tool — except 0006, which is the one file whose number i
 older than its contents and goes last. New changes go in a new numbered file; never edit an
 applied one.
 
-`merge_listings` is defined six times — 0003, 0004, 0005, 0007 and 0008 are
-history, 0009 is the live version.
+`merge_listings` is defined seven times — 0003, 0004, 0005, 0007, 0008 and 0009
+are history, 0010 is the live version.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -375,6 +381,122 @@ blocked, errors, skipped_deadline }`, plus `checkedListing` on a single-listing
 run. The shape comes from `emptySync()` — a factory, not a shared constant, so
 no two responses hand out the same `changed` array. Every run logs one
 `[sync] done` line carrying the same numbers.
+
+## Maps
+
+Two questions, answered once each and then cached: **where is this apartment**
+and **how long does it take to get from it to the places we care about**. Both
+are free or nearly so, and the expensive one is metered on purpose.
+
+**Providers.**
+
+| Job | Provider | Cost | Key |
+|---|---|---|---|
+| Tiles / map rendering | MapLibre GL JS + **OpenFreeMap** (`tiles.openfreemap.org/styles/liberty`) | $0 | none |
+| Geocoding | **NYC GeoSearch** (`geosearch.planninglabs.nyc`, Pelias, NYC-only), fallback **Nominatim** | $0 | none |
+| Walk / bike / transit durations | **Google Routes API** `computeRoutes` | free tier 10k calls/mo | `GOOGLE_MAPS_API_KEY`, server-only |
+| Subway stations | NYC Open Data / MTA export, bundled at `public/data/subway-stations.geojson` | $0 | none, no request |
+
+Rejected: Mapbox (key, tracking, no transit), OSRM demo (car only), Valhalla
+public (no NYC transit), OpenRouteService (walk/bike fine, no transit — the
+documented fallback if Google billing is ever dropped), Google Maps JS for the
+map itself (cost and tracking for something MapLibre does free).
+
+**The pin is stored, never computed at read time.** `POST /api/geocode` takes
+`{ listingId }` (geocode the stored address, write `lat/lng/geocoded_at/
+geocode_note` with the admin client) or `{ address }` (coordinates only, for
+the locations dialog's preview). It runs automatically after `createListing`
+and after any edit where `addressChanged(patch, prev)` — fire-and-forget from
+`mutations.ts`, so the add dialog navigates away and the pin arrives over
+realtime like an imported photo.
+
+`geocode_note` is provenance, not status: `nyc-geosearch`, `nominatim`,
+`low-confidence (…)` — worth a human glance, shown as "⚠ check pin" and
+correctable by dragging, which writes `manual` — or `failed: …`. **A null `lat`
+with a `failed:` note means we looked; a null `lat` with no note means nobody
+has.** Recording the failed attempt is what stops the automatic geocode
+retrying forever on an address no provider can place.
+
+**Editing an address throws both answers away.** Two triggers in 0010: a BEFORE
+UPDATE one nulls the four geo columns, an AFTER UPDATE one deletes that
+listing's `commute_times`. Both stand down while `merge_listings` is running
+(`aq.merging`, transaction-local) — the merge backfill fills a blank `unit`
+from the duplicate, which is an address change as far as a trigger is
+concerned, and without the guard folding "214 Grand St" into "214 Grand St #4B"
+would delete the very rows the function had just carried across.
+
+**Commute times are a cache with a cost guard.** `POST /api/commutes`
+`{ listingId?, locationId?, force? }` fills in the *missing* squares of
+(geocoded, live, still-in-play listings) × (saved locations) × (walk, bike,
+transit), four at a time, 8s per call, and never recomputes a row younger than
+30 days unless `force` says so. Sixty listings and five locations is ~900 rows
+**in total**, not per month. `departureTime` for TRANSIT is the next weekday
+09:00 in New York (`nextWeekdayNineAmNY`, tested against both DST halves and
+every day of the week) — a fixed rush hour, so two listings looked at on
+different days are still comparable, and always in the future, which Google
+requires.
+
+**A pair that fails is not a failed run.** `computeRoute` returns
+`{ ok: false, error }` rather than throwing for anything Google says — 403 is
+billing or key restrictions, 400 is a request we got wrong — so a broken
+deployment is 900 identical tooltips and not a 500. The row stores its `error`,
+the card shows "—", and the Google Maps deep link beside it still works because
+that costs nothing and needs no key. Missing key → 503 `{ disabled: true }`.
+
+**Both routes have two doors**, factored into `src/lib/api-auth.ts` from the
+sync route: the logged-in session, or `Authorization: Bearer $CRON_SECRET`
+compared in constant time. `src/lib/supabase/middleware.ts` lets all three past
+its signed-out guard (`BEARER_ROUTES`) so a terminal can backfill without a
+browser:
+
+```bash
+curl -sS -X POST http://localhost:3000/api/geocode \
+  -H "Authorization: Bearer $CRON_SECRET" -H 'content-type: application/json' \
+  -d '{"listingId":"<uuid>"}' | jq
+
+curl -sS -X POST http://localhost:3000/api/commutes \
+  -H "Authorization: Bearer $CRON_SECRET" -H 'content-type: application/json' \
+  -d '{"listingId":"<uuid>","force":true}' | jq
+```
+
+There is no SSRF surface on either route: every outbound host is a constant in
+`src/lib/geo/*`, and a typed address only ever becomes a query-string value.
+`assertSafeUrl` exists for the import ladder because *there* the person supplies
+the host.
+
+**Nominatim's policy is honoured, not assumed**: one request per second
+(serialised through a queue in `geocode.ts`, so "Locate all" waits its turn
+rather than getting us banned) and `User-Agent: apartment-quest
+(lohikansun@gmail.com)`. It is the fallback and not the default, and anything it
+answers is flagged low-confidence by definition — rung one is the one that
+actually knows New York.
+
+**Attribution is not optional.** MapLibre's attribution control stays visible on
+every map (OpenFreeMap + © OpenStreetMap contributors). Google's terms allow
+Routes results to be shown *without* a Google map only with a "Powered by
+Google" credit, so that line sits under the commute table. Neither is
+decoration; removing either is a licence violation.
+
+**Which places a person sees is a device preference, not data.** `locations` is
+shared — one hunt, one list — and `src/lib/prefs.ts` keeps the toggles and the
+starred place in localStorage (`aq.locations.hidden:<personId>`,
+`aq.locations.primary:<personId>`) behind the same `useSyncExternalStore`
+pattern `person.tsx` uses. Snapshots are cached against the exact stored string,
+because a fresh `Set` per read is an infinite render loop.
+
+**The subway is a file, not an API.** `public/data/subway-stations.geojson` is
+the MTA's own export trimmed to `{ name, lines }` per station *complex* (Times
+Sq is one place to walk to, not five), rounded to five decimals — 445 features,
+60KB. `nearestStation` is haversine plus 80 m/min, is labelled as an estimate
+wherever it appears, and says nothing at all beyond 2km rather than claiming a
+40-minute walk to the L.
+
+**`commute_times` rides on the listing row.** `LISTING_SELECT` embeds
+`commute_times(location_id, mode, seconds, meters, error)`, so the table
+column, the map's mini card and the detail card all read from a query that
+already runs — the same argument votes and photos won. `useCommutes(id)` is
+`useListing(id)` with a `select`, i.e. one cache entry, and `commuteIndex` turns
+the array into `location → mode → row`.
 
 ## Design system — "Dusk Candy"
 

@@ -15,6 +15,9 @@ function apiUnauthorized(error: string) {
   return NextResponse.json({ error }, { status: 401 });
 }
 
+/** See `isCron` below: routes that carry their own constant-time bearer check. */
+const BEARER_ROUTES = new Set(["/api/sync", "/api/geocode", "/api/commutes"]);
+
 /**
  * Refreshes the auth session cookie and guards routes.
  * Called from `src/proxy.ts` (Next 16's renamed middleware).
@@ -23,14 +26,19 @@ export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const isApi = request.nextUrl.pathname.startsWith("/api/");
   /**
-   * The one route that is allowed to arrive signed out: pg_cron POSTs
-   * `/api/sync` with a bearer token and no cookies whatsoever, and this guard
-   * would answer it 401 before the route could compare that token. The route
-   * checks `CRON_SECRET` itself (constant time) and falls back to `getUser()`
-   * for the "Check now" button, so nothing is unlocked here — the decision is
+   * The routes that are allowed to arrive signed out, because they have a
+   * second door: a bearer `CRON_SECRET` and no cookies whatsoever, which this
+   * guard would answer 401 before the route could compare the token. Each one
+   * checks the secret itself in constant time and falls back to `getUser()`
+   * (`src/lib/api-auth.ts`), so nothing is unlocked here — the decision is
    * simply made one layer in.
+   *
+   * `/api/sync` is pg_cron's. `/api/geocode` and `/api/commutes` are the same
+   * shape: a terminal holding the secret can backfill pins and commute times
+   * without a browser session, which is how they are tested and how a bulk
+   * re-geocode is run.
    */
-  const isCron = request.nextUrl.pathname === "/api/sync";
+  const isCron = BEARER_ROUTES.has(request.nextUrl.pathname);
 
   const { url, key } = supabaseEnv();
   // No env means no way to check the session, so fail closed: everything but

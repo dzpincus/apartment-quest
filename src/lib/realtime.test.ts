@@ -200,6 +200,8 @@ describe("keysForChange — contract", () => {
     "brokers",
     "people",
     "listing_photos",
+    "locations",
+    "commute_times",
   ] as const;
 
   it("returns at least one key for every table in the publication", () => {
@@ -233,6 +235,7 @@ describe("keysForChange — contract", () => {
       "votes",
       "brokers",
       "people",
+      "locations",
     ]);
     for (const table of TABLES) {
       for (const row of [{}, { id: LISTING, listing_id: LISTING }, { listing_id: null }]) {
@@ -241,5 +244,41 @@ describe("keysForChange — contract", () => {
         }
       }
     }
+  });
+});
+
+describe("keysForChange — the map (0010)", () => {
+  it("routes a saved place to the locations list", () => {
+    expect(keysForChange("locations", { id: OTHER, name: "Work" })).toEqual([
+      queryKeys.locations,
+    ]);
+  });
+
+  it("routes a commute time to the listing it is embedded in", () => {
+    // `commute_times` has no key of its own — the rows arrive inside
+    // `LISTING_SELECT`, exactly like photos and votes.
+    expect(
+      keysForChange("commute_times", {
+        listing_id: LISTING,
+        location_id: OTHER,
+        mode: "transit",
+      }),
+    ).toEqual([queryKeys.listings, queryKeys.listing(LISTING)]);
+  });
+
+  it("still names the listing on a DELETE", () => {
+    // The primary key is (listing_id, location_id, mode), so even the default
+    // replica identity carries the listing id.
+    expect(
+      keysForChange("commute_times", {
+        listing_id: LISTING,
+        location_id: OTHER,
+        mode: "walk",
+      })[1],
+    ).toEqual(queryKeys.listing(LISTING));
+  });
+
+  it("falls back to the whole table when the listing id is missing", () => {
+    expect(keysForChange("commute_times", {})).toEqual([queryKeys.listings]);
   });
 });

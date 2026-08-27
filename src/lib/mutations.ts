@@ -26,6 +26,11 @@ import { resizeImage, webpName } from "@/lib/images";
 import { BATCH_TOO_BIG_MESSAGE, type SavePhotosResponse } from "@/lib/photo-types";
 import { LINK_STATE_LABELS, listingLabel, STATUS_LABELS } from "@/lib/format";
 import type { SyncResponse } from "@/lib/sync-types";
+import type {
+  CommutesRequest,
+  CommutesResponse,
+  GeocodeResponse,
+} from "@/lib/geo-types";
 import { upsertVote, withoutVote } from "@/lib/votes";
 import { fmtDay } from "@/lib/time";
 import type {
@@ -38,8 +43,10 @@ import type {
   Listing,
   ListingState,
   ListingStatus,
+  Location,
   Message,
   NewBroker,
+  NewLocation,
   Uuid,
   Vote,
   VoteValue,
@@ -70,6 +77,13 @@ const NOISY_COLUMNS = new Set<string>([
   "listing_state",
   "state_checked_at",
   "state_note",
+  // The geo columns (0010) travel as a set and are written by one of two
+  // things: the geocoder, which is a robot, or a dragged pin, which logs
+  // itself. `lat` is left out of this list and labelled "map pin" below, so a
+  // correction reads as one line rather than as four columns nobody types.
+  "lng",
+  "geocoded_at",
+  "geocode_note",
 ]);
 
 const FIELD_LABELS: Record<string, string> = {
@@ -95,6 +109,7 @@ const FIELD_LABELS: Record<string, string> = {
   ac: "AC",
   outdoor_space: "outdoor space",
   broker_id: "broker",
+  lat: "map pin",
   added_by: "added by",
   status: "status",
   merged_into: "merge",
@@ -800,6 +815,178 @@ export async function deletePhoto(photoId: Uuid): Promise<void> {
   }
 }
 
+// -- locations & the map -----------------------------------------------------
+//
+// Saved places are shared: one list, four people, and *which* of them a given
+// device draws is a preference in localStorage (`src/lib/prefs.ts`), not a row.
+// The two API-route writes below obey the "all writes go through mutations.ts"
+// rule with a different transport, exactly like the photo writes: the geocoder
+// and the Google key live server-side.
+
+export type NewLocationInput = Omit<NewLocation, "added_by" | "id" | "emoji"> & {
+  emoji?: string | null;
+};
+
+/**
+ * A place worth measuring from. Geocoded *before* this is called (the dialog
+ * previews the pin on blur), because `locations.lat/lng` are NOT NULL — a
+ * saved place nobody can find is not a saved place.
+ */
+export async function createLocation(
+  personId: Uuid,
+  input: NewLocationInput,
+): Promise<Location> {
+  const { data, error } = await createClient()
+    .from("locations")
+    .insert({
+      name: input.name.trim(),
+      address: input.address.trim(),
+      lat: input.lat,
+      lng: input.lng,
+      emoji: input.emoji?.trim() || null,
+      added_by: personId,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  const location = data as Location;
+  await logActivity({
+    personId,
+    verb: "added_location",
+    entityType: "location",
+    entityId: location.id,
+    summary: `added location ${location.name}`,
+  });
+  return location;
+}
+
+/**
+ * Renaming a place or changing its glyph is bookkeeping, not an impression —
+ * no activity row, the same call `updateBroker` makes. Moving it *is* worth
+ * something, but the cached times are the thing that has to react, and the
+ * dialog recomputes them rather than the feed narrating it.
+ */
+export async function updateLocation(
+  _personId: Uuid,
+  id: Uuid,
+  patch: Partial<Omit<Location, "id" | "created_at" | "added_by">>,
+): Promise<Location> {
+  const { data, error } = await createClient()
+    .from("locations")
+    .update(patch)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Location;
+}
+
+/**
+ * Removing a place takes its cached commute times with it — `commute_times`
+ * cascades on `location_id` (0010), so there is nothing to clean up here and
+ * no orphan row to render a column from.
+ */
+export async function deleteLocation(
+  personId: Uuid,
+  location: Pick<Location, "id" | "name">,
+): Promise<void> {
+  const { error } = await createClient().from("locations").delete().eq("id", location.id);
+  if (error) throw error;
+  await logActivity({
+    personId,
+    verb: "removed_location",
+    entityType: "location",
+    entityId: location.id,
+    summary: `removed location ${location.name}`,
+  });
+}
+
+/**
+ * Put a listing on the map. The route geocodes the *stored* address with the
+ * admin client and writes `lat/lng/geocoded_at/geocode_note`, so the answer is
+ * shared the moment it lands rather than being one device's opinion.
+ *
+ * A deployment with no admin key answers 503 `{ disabled: true }`, which is
+ * returned rather than thrown: there is nothing a person can do about it and
+ * the rest of the listing works fine without a pin.
+ */
+export async function geocodeListing(listingId: Uuid): Promise<GeocodeResponse> {
+  return postGeo("/api/geocode", { listingId }, "Couldn't find that address.");
+}
+
+/** The locations dialog's preview: coordinates for an address, nothing written. */
+export async function geocodeAddressPreview(
+  address: string,
+  unit?: string | null,
+): Promise<GeocodeResponse> {
+  return postGeo("/api/geocode", { address, unit: unit ?? null }, "Couldn't find that address.");
+}
+
+/**
+ * Fill in the missing squares of the grid (listing x location x mode). Cheap
+ * by construction: the route skips anything computed in the last 30 days
+ * unless `force` says otherwise, so calling this after every geocode costs
+ * nothing when there is nothing new to ask.
+ */
+export async function computeCommutes(
+  args: CommutesRequest = {},
+): Promise<CommutesResponse> {
+  return postGeo("/api/commutes", args, "Couldn't work out the commute times.");
+}
+
+/** Shared transport for the two map routes. `disabled` is an answer, not a throw. */
+async function postGeo<T extends { disabled?: boolean; error?: string }>(
+  path: string,
+  body: unknown,
+  fallback: string,
+): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => null)) as T | null;
+  if (parsed?.disabled) return parsed;
+  if (!res.ok || !parsed) throw new Error(parsed?.error ?? fallback);
+  return parsed;
+}
+
+/**
+ * Drag-to-correct on the detail map. Goes through `updateListing` so the edit
+ * is logged like any other ("edited 214 Grand St #4B (map pin)"), and stamps
+ * `geocode_note: 'manual'` — a pin a person placed outranks anything a
+ * geocoder guessed, and the "⚠ check pin" warning goes with it.
+ */
+export async function setListingCoords(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit">,
+  lat: number,
+  lng: number,
+): Promise<Listing> {
+  return updateListing(
+    personId,
+    listing.id,
+    {
+      lat,
+      lng,
+      geocoded_at: new Date().toISOString(),
+      geocode_note: "manual",
+    },
+    null,
+  );
+}
+
+/**
+ * Did this edit move the building? Pure, so the auto-geocode below fires on an
+ * address that actually changed rather than on every save of a form that
+ * happens to include the address field.
+ */
+export function addressChanged(patch: ListingPatch, prev: Listing | null): boolean {
+  if (!("address" in patch) && !("unit" in patch)) return false;
+  if (!prev) return true;
+  return meaningfulChanges(patch, prev).some((k) => k === "address" || k === "unit");
+}
+
 // -- people ------------------------------------------------------------------
 // Renaming yourself and stating your income are settings, not impressions.
 // No activity rows for either.
@@ -857,6 +1044,36 @@ export function useMutations(personId: Uuid | undefined) {
     void qc.invalidateQueries({ queryKey: queryKeys.activity });
   };
 
+  const invalidateLocations = () => {
+    void qc.invalidateQueries({ queryKey: queryKeys.locations });
+    void qc.invalidateQueries({ queryKey: queryKeys.activity });
+  };
+
+  /**
+   * Put a new (or newly re-addressed) listing on the map without making anybody
+   * wait for it. Fire-and-forget on purpose: the add dialog navigates away
+   * while this is still in flight and the pin arrives over realtime, exactly
+   * like an imported photo. Only a *failure* is worth a word — and a quiet one,
+   * since an address nobody can geocode is still a perfectly good listing.
+   */
+  const autoLocate = (listingId: Uuid) => {
+    void (async () => {
+      try {
+        const located = await geocodeListing(listingId);
+        invalidateListings(listingId);
+        if (located.disabled || located.lat == null) return;
+        // Free when there is nothing new to ask: the route skips every pair it
+        // computed in the last 30 days.
+        await computeCommutes({ listingId });
+        invalidateListings(listingId);
+      } catch (error) {
+        toast.warning("Couldn't put that address on the map.", {
+          description: field(error, "message") ?? undefined,
+        });
+      }
+    })();
+  };
+
   /**
    * `label` is the context ("Could not add the listing"), not the headline:
    * a raw `duplicate key value violates unique constraint "people_name_lower"`
@@ -878,14 +1095,22 @@ export function useMutations(personId: Uuid | undefined) {
 
   const create = useMutation({
     mutationFn: (input: NewListingInput) => createListing(requirePerson(), input),
-    onSuccess: (listing) => invalidateListings(listing.id),
+    onSuccess: (listing) => {
+      invalidateListings(listing.id);
+      autoLocate(listing.id);
+    },
     onError: onError("Could not add the listing"),
   });
 
   const update = useMutation({
     mutationFn: (vars: { id: Uuid; patch: ListingPatch; prev: Listing | null }) =>
       updateListing(requirePerson(), vars.id, vars.patch, vars.prev),
-    onSuccess: (listing) => invalidateListings(listing.id),
+    onSuccess: (listing, vars) => {
+      invalidateListings(listing.id);
+      // The address moved, so a trigger has already thrown the old pin and the
+      // old commute times away (0010). Go and get new ones.
+      if (addressChanged(vars.patch, vars.prev)) autoLocate(listing.id);
+    },
     onError: onError("Could not save the change"),
   });
 
@@ -1174,6 +1399,158 @@ export function useMutations(personId: Uuid | undefined) {
     },
   });
 
+  // -- locations & the map ---------------------------------------------------
+
+  const addLocation = useMutation({
+    mutationFn: (input: NewLocationInput) => createLocation(requirePerson(), input),
+    onSuccess: (location) => {
+      invalidateLocations();
+      toast.success(`Added ${location.name}`);
+      // A new place is the one moment the grid is genuinely empty for a whole
+      // column, so this is the call that actually spends anything. It still
+      // does not block the dialog closing.
+      void computeCommutes({ locationId: location.id })
+        .then(() => invalidateListings())
+        .catch((error) => console.warn("commute backfill failed", error));
+    },
+    onError: onError("Could not add the location"),
+  });
+
+  const editLocation = useMutation({
+    mutationFn: (vars: {
+      id: Uuid;
+      patch: Partial<Omit<Location, "id" | "created_at" | "added_by">>;
+    }) => updateLocation(requirePerson(), vars.id, vars.patch),
+    onSuccess: (location, vars) => {
+      invalidateLocations();
+      // Moved, not renamed: every cached time to this place was measured from
+      // somewhere else. `force` is what makes the recompute ignore the 30-day
+      // guard those rows are still inside.
+      if (vars.patch.lat != null || vars.patch.lng != null) {
+        void computeCommutes({ locationId: location.id, force: true })
+          .then(() => invalidateListings())
+          .catch((error) => console.warn("commute recompute failed", error));
+      }
+    },
+    onError: onError("Could not save the location"),
+  });
+
+  const removeLocation = useMutation({
+    mutationFn: (location: Pick<Location, "id" | "name">) =>
+      deleteLocation(requirePerson(), location),
+    onSuccess: (_data, location) => {
+      invalidateLocations();
+      // The cached times went with it (cascade), and they were embedded in
+      // every listing row.
+      invalidateListings();
+      toast.success(`Removed ${location.name}`);
+    },
+    onError: onError("Could not remove the location"),
+  });
+
+  /**
+   * The "Locate" button on a listing with no pin. Owns its toast start to
+   * finish — two geocoders, one of them deliberately throttled, is long enough
+   * that a button which merely goes quiet reads as broken.
+   */
+  const locate = useMutation<GeocodeResponse, unknown, Uuid, { toastId: string | number }>({
+    mutationFn: (listingId) => geocodeListing(listingId),
+    onMutate: () => ({ toastId: toast.loading("Looking that address up…") }),
+    onSuccess: (result, listingId, ctx) => {
+      if (result.disabled) {
+        toast.error("Maps aren't configured on this deployment.", { id: ctx?.toastId });
+      } else if (result.lat == null) {
+        toast.error("Couldn't find that address.", {
+          id: ctx?.toastId,
+          description: result.error,
+        });
+      } else if (result.lowConfidence) {
+        toast.warning("Found it, but check the pin.", {
+          id: ctx?.toastId,
+          description: "Drag it on the map if it's wrong.",
+        });
+      } else {
+        toast.success("Found it", { id: ctx?.toastId });
+      }
+      invalidateListings(listingId);
+      if (result.lat != null) {
+        void computeCommutes({ listingId })
+          .then(() => invalidateListings(listingId))
+          .catch((error) => console.warn("commute backfill failed", error));
+      }
+    },
+    onError: (error, _listingId, ctx) => {
+      toast.error(field(error, "message") ?? "Couldn't find that address.", {
+        id: ctx?.toastId,
+      });
+    },
+  });
+
+  /**
+   * The locations dialog's on-blur preview: no row, no write and no toast —
+   * the form shows the pin it found and the person decides whether to keep it.
+   * A half-typed address failing is not news, so the failure only reaches the
+   * console (and keeps the rejection handled).
+   */
+  const previewAddress = useMutation({
+    mutationFn: (vars: { address: string; unit?: string | null }) =>
+      geocodeAddressPreview(vars.address, vars.unit ?? null),
+    onError: (error) => console.warn("address preview failed", error),
+  });
+
+  /** Drag-to-correct. The recompute is forced: the building actually moved. */
+  const movePin = useMutation({
+    mutationFn: (vars: {
+      listing: Pick<Listing, "id" | "address" | "unit">;
+      lat: number;
+      lng: number;
+    }) => setListingCoords(requirePerson(), vars.listing, vars.lat, vars.lng),
+    onSuccess: (listing) => {
+      invalidateListings(listing.id);
+      void computeCommutes({ listingId: listing.id, force: true })
+        .then(() => invalidateListings(listing.id))
+        .catch((error) => console.warn("commute recompute failed", error));
+    },
+    onError: onError("Could not move the pin"),
+  });
+
+  /**
+   * "Refresh times" on the detail card, and the batch behind "Locate all".
+   * Reports what it did, because this is the one button in the app that spends
+   * somebody's Google quota on purpose.
+   */
+  const refreshCommutes = useMutation<
+    CommutesResponse,
+    unknown,
+    CommutesRequest,
+    { toastId: string | number }
+  >({
+    mutationFn: (args) => computeCommutes(args),
+    onMutate: () => ({ toastId: toast.loading("Working out the times…") }),
+    onSuccess: (result, vars, ctx) => {
+      if (result.disabled) {
+        toast.error("Commute times aren't configured on this deployment.", {
+          id: ctx?.toastId,
+        });
+      } else if (result.computed === 0) {
+        toast.success("Already up to date", { id: ctx?.toastId });
+      } else if (result.errors > 0) {
+        toast.warning(`Updated ${result.computed - result.errors} of ${result.computed}`, {
+          id: ctx?.toastId,
+          description: result.rows.find((row) => row.error)?.error ?? undefined,
+        });
+      } else {
+        toast.success(`Updated ${result.computed} times`, { id: ctx?.toastId });
+      }
+      invalidateListings(vars.listingId);
+    },
+    onError: (error, _vars, ctx) => {
+      toast.error(field(error, "message") ?? "Couldn't work out the commute times.", {
+        id: ctx?.toastId,
+      });
+    },
+  });
+
   const renamePerson = useMutation({
     mutationFn: (name: string) => updatePersonName(requirePerson(), name),
     onSuccess: () => {
@@ -1211,6 +1588,13 @@ export function useMutations(personId: Uuid | undefined) {
     deletePhoto: removePhoto,
     createBroker: addBroker,
     updateBroker: editBroker,
+    createLocation: addLocation,
+    updateLocation: editLocation,
+    deleteLocation: removeLocation,
+    geocodeListing: locate,
+    geocodeAddressPreview: previewAddress,
+    setListingCoords: movePin,
+    computeCommutes: refreshCommutes,
     updatePersonName: renamePerson,
     updatePersonIncome: setIncome,
   };

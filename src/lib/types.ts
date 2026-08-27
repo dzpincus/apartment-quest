@@ -43,6 +43,15 @@ export type OutdoorSpacePolicy = "private" | "shared" | "none" | "unknown";
  */
 export type ListingState = "active" | "off_market" | "removed" | "unknown";
 
+/**
+ * The three ways to get somewhere (0010). Ours, not Google's — the mapping to
+ * `WALK` / `BICYCLE` / `TRANSIT` lives in `src/lib/geo/routes.ts`, so swapping
+ * routing providers never reaches the database.
+ */
+export type CommuteMode = "walk" | "bike" | "transit";
+
+export const COMMUTE_MODES: readonly CommuteMode[] = ["walk", "bike", "transit"];
+
 export type VoteValue = "yes" | "no" | "maybe";
 export type InteractionKind = "call" | "email" | "text" | "tour" | "note";
 
@@ -59,9 +68,20 @@ export type ActivityVerb =
   | "merged_listing"
   | "added_photos"
   /** Written by Quest Bot from `/api/sync` — the listing page moved on. */
-  | "listing_state_changed";
+  | "listing_state_changed"
+  /** Saved places (0010). "added location Work" / "removed location Gym". */
+  | "added_location"
+  | "removed_location";
 
-export type EntityType = "listing" | "broker" | "message" | "document";
+export type EntityType =
+  | "listing"
+  | "broker"
+  | "message"
+  | "document"
+  /** A saved place (0010). There is no page for one, so `activityHref` leaves
+   *  the feed row as text — the dialog on the map and the commute card is
+   *  where locations are managed. */
+  | "location";
 
 export type DocType =
   | "pay_stubs"
@@ -130,6 +150,20 @@ export type Listing = {
   next_action: string | null;
   next_action_due: DateOnly | null;
   next_action_owner: Uuid | null;
+  /**
+   * Where the building is (0010). Written by `POST /api/geocode` and by
+   * drag-to-correct on the detail map; nulled by a trigger the moment
+   * `address` or `unit` changes, because a pin is an answer about an address.
+   *
+   * `geocode_note` is provenance, not status: `'nyc-geosearch'`,
+   * `'nominatim'`, `'low-confidence (nyc-geosearch)'` — worth a human glance —
+   * or `'failed: …'`. A null `lat` with a `failed:` note means we looked; a
+   * null `lat` with no note means nobody has.
+   */
+  lat: number | null;
+  lng: number | null;
+  geocoded_at: Timestamptz | null;
+  geocode_note: string | null;
   /** Generated column — never write to it. */
   dedupe_key: string;
   merged_into: Uuid | null;
@@ -158,6 +192,43 @@ export type ListingPhoto = {
   sort: number;
   added_by: Uuid | null;
   created_at: Timestamptz | null;
+};
+
+/**
+ * A saved place (0010) — work, the gym, somebody's parents. Shared by all four
+ * people on purpose: one hunt, one list. *Which* of them a given device shows
+ * is a preference, not data, and lives in localStorage (`src/lib/prefs.ts`).
+ *
+ * `lat`/`lng` are NOT NULL: a location is geocoded before its row is written,
+ * so "a saved place with no coordinates" is not a state this table can be in.
+ */
+export type Location = {
+  id: Uuid;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  /** Free text, one glyph, for the pin. Optional. */
+  emoji: string | null;
+  added_by: Uuid | null;
+  created_at: Timestamptz | null;
+};
+
+/**
+ * One cached answer from the Routes API (0010): listing × location × mode.
+ *
+ * `seconds`/`meters` null with `error` set is a pair Google refused — the card
+ * shows "—" with the reason in a tooltip, and the Google Maps deep link beside
+ * it still works, because that costs nothing and needs no key.
+ */
+export type CommuteTime = {
+  listing_id: Uuid;
+  location_id: Uuid;
+  mode: CommuteMode;
+  seconds: number | null;
+  meters: number | null;
+  computed_at: Timestamptz | null;
+  error: string | null;
 };
 
 export type Interaction = {
@@ -237,6 +308,7 @@ export type NewListing = Omit<
   "id" | "dedupe_key" | "created_at" | "updated_at"
 > & { id?: Uuid };
 export type NewBroker = Omit<Broker, "id" | "created_at"> & { id?: Uuid };
+export type NewLocation = Omit<Location, "id" | "created_at"> & { id?: Uuid };
 export type NewInteraction = Omit<Interaction, "id" | "occurred_at"> & {
   occurred_at?: Timestamptz;
 };

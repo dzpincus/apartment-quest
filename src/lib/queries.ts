@@ -12,9 +12,12 @@ import { peopleQueryOptions, usePerson } from "@/lib/person";
 import type {
   Activity,
   Broker,
+  CommuteMode,
+  CommuteTime,
   Interaction,
   Listing,
   ListingPhoto,
+  Location,
   Message,
   Person,
   UnreadCount,
@@ -43,6 +46,17 @@ export type PhotoRef = Pick<
   "id" | "storage_path" | "thumb_path" | "width" | "height" | "sort"
 >;
 
+/**
+ * A cached commute as it arrives embedded in a listing (0010). `listing_id` is
+ * left off — it is the row you found it on — and `computed_at` is not selected:
+ * nothing on screen shows it, the 30-day guard is enforced server-side by
+ * `/api/commutes`, and this array rides along on every listing read.
+ */
+export type CommuteRef = Pick<
+  CommuteTime,
+  "location_id" | "mode" | "seconds" | "meters" | "error"
+>;
+
 /** Broker/person columns joined onto a listing row, plus everyone's votes. */
 export type ListingRow = Listing & {
   broker: Pick<Broker, "id" | "name" | "company" | "phone" | "email" | "notes"> | null;
@@ -50,6 +64,7 @@ export type ListingRow = Listing & {
   next_action_owner_person: PersonRef | null;
   votes: VoteRow[];
   photos: PhotoRef[];
+  commute_times: CommuteRef[];
 };
 
 export type ActivityRow = Activity & { person: PersonRef | null };
@@ -87,6 +102,11 @@ export const EMPTY_UNREAD: UnreadSummary = { global: 0, byListing: {}, total: 0 
  * `order` modifier: a merge can leave two photos sharing a `sort` (0007), and
  * `(sort, id)` is the tie-break that keeps the strip from reshuffling itself
  * between refetches.
+ *
+ * Commute times (0010) ride along for the third time on the same argument: the
+ * table's "Transit to ⭐" column, the map's mini card and the detail page's
+ * "Getting there" card all want them, and fifteen small rows on a query that
+ * already runs is cheaper than one commute query per visible listing.
  */
 const LISTING_SELECT = `
   *,
@@ -94,7 +114,8 @@ const LISTING_SELECT = `
   added_by_person:people!added_by(id, name, color),
   next_action_owner_person:people!next_action_owner(id, name, color),
   votes(person_id, vote, comment, updated_at),
-  photos:listing_photos(id, storage_path, thumb_path, width, height, sort)
+  photos:listing_photos(id, storage_path, thumb_path, width, height, sort),
+  commute_times(location_id, mode, seconds, meters, error)
 `;
 
 /**
@@ -115,6 +136,8 @@ function withSortedPhotos<T extends { photos?: PhotoRef[] | null }>(row: T): T {
 export const queryKeys = {
   people: ["people"] as const,
   brokers: ["brokers"] as const,
+  /** The shared saved places (0010). Per-device visibility is `prefs.ts`. */
+  locations: ["locations"] as const,
   listings: ["listings"] as const,
   listing: (id: Uuid) => ["listings", id] as const,
   listingByDedupeKey: (key: string) => ["listings", "dedupe", key] as const,
@@ -196,6 +219,16 @@ export async function fetchListingByDedupeKey(
   return data ? withSortedPhotos(data as unknown as ListingRow) : null;
 }
 
+/** The saved places, oldest first — the order they were added in. */
+export async function fetchLocations(): Promise<Location[]> {
+  const { data, error } = await createClient()
+    .from("locations")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Location[];
+}
+
 /** Reverse-chronological feed, pre-rendered summaries (SPEC: "Activity tracking"). */
 export async function fetchActivity(limit: number): Promise<ActivityRow[]> {
   const { data, error } = await createClient()
@@ -267,6 +300,17 @@ export function useBrokers() {
   });
 }
 
+/**
+ * Every saved place. Shared data, so there is one cache entry for all four
+ * people; `src/lib/prefs.ts` decides which of them *this device* draws.
+ */
+export function useLocations() {
+  return useQuery({
+    queryKey: queryKeys.locations,
+    queryFn: fetchLocations,
+  });
+}
+
 export function useListings() {
   return useQuery({
     queryKey: queryKeys.listings,
@@ -325,6 +369,40 @@ export function useVotes(id: Uuid | undefined) {
     enabled: Boolean(id),
     select: (listing: ListingRow | null) => listing?.votes ?? [],
   });
+}
+
+/**
+ * One listing's cached commute times, keyed by `location_id` and mode. Same key
+ * and same fetcher as `useListing`, so this is a view of that one cache entry
+ * rather than a second request — exactly like `useVotes`.
+ *
+ * A missing pair is a missing entry, not a zero: the card shows "—" and offers
+ * "Refresh times", which is the only thing that spends money.
+ */
+export function useCommutes(listingId: Uuid | undefined) {
+  return useQuery({
+    queryKey: queryKeys.listing(listingId ?? "none"),
+    queryFn: () => fetchListing(listingId as Uuid),
+    enabled: Boolean(listingId),
+    select: (listing: ListingRow | null) => listing?.commute_times ?? [],
+  });
+}
+
+/**
+ * `commute_times` as a lookup: `byLocation.get(locationId)?.get(mode)`. Pure,
+ * so the commute card and the table column share one shape and neither has to
+ * scan an array per cell.
+ */
+export function commuteIndex(
+  rows: readonly CommuteRef[] | null | undefined,
+): Map<Uuid, Map<CommuteMode, CommuteRef>> {
+  const index = new Map<Uuid, Map<CommuteMode, CommuteRef>>();
+  for (const row of rows ?? []) {
+    const modes = index.get(row.location_id) ?? new Map<CommuteMode, CommuteRef>();
+    modes.set(row.mode, row);
+    index.set(row.location_id, modes);
+  }
+  return index;
 }
 
 /**

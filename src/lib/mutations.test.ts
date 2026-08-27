@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addressChanged,
   blankForMerge,
   clearVoteSummary,
   meaningfulChanges,
@@ -59,6 +60,10 @@ const BASE: Listing = {
   next_action: null,
   next_action_due: null,
   next_action_owner: null,
+  lat: 40.7173,
+  lng: -73.95687,
+  geocoded_at: "2025-08-01T00:00:05Z",
+  geocode_note: "nyc-geosearch",
   dedupe_key: "214grandst|4b",
   merged_into: null,
   created_at: "2025-08-01T00:00:00Z",
@@ -404,5 +409,52 @@ describe("clearVoteSummary", () => {
     expect(clearVoteSummary("(no address)", { vote: "yes", comment: null })).toBe(
       "withdrew vote on (no address)",
     );
+  });
+});
+
+describe("addressChanged — when the map has to catch up", () => {
+  it("is false for an edit that never mentions the address", () => {
+    expect(addressChanged({ rent: 3400 }, BASE)).toBe(false);
+    expect(addressChanged({ notes: "ask about the boiler" }, BASE)).toBe(false);
+  });
+
+  it("is false when the address is sent back unchanged", () => {
+    // The detail page's inline edits submit the field they own, blur or no
+    // blur; re-geocoding on every one of those would be a lookup per keystroke.
+    expect(addressChanged({ address: "214 Grand St" }, BASE)).toBe(false);
+    expect(addressChanged({ address: "214 Grand St", unit: "4B" }, BASE)).toBe(false);
+  });
+
+  it("is true when the street changes", () => {
+    expect(addressChanged({ address: "216 Grand St" }, BASE)).toBe(true);
+  });
+
+  it("is true when only the unit changes", () => {
+    // A unit is not a new building, but the trigger clears the pin either way
+    // (0010) and a listing with no pin is a listing off the map.
+    expect(addressChanged({ unit: "5C" }, BASE)).toBe(true);
+    expect(addressChanged({ unit: null }, BASE)).toBe(true);
+  });
+
+  it("is true with no previous row to compare against", () => {
+    expect(addressChanged({ address: "214 Grand St" }, null)).toBe(true);
+    expect(addressChanged({ rent: 3400 }, null)).toBe(false);
+  });
+});
+
+describe("meaningfulChanges — the map pin", () => {
+  it("reads a moved pin as one field, not four", () => {
+    expect(
+      changes({
+        lat: 40.72,
+        lng: -73.95,
+        geocoded_at: "2026-01-01T00:00:00Z",
+        geocode_note: "manual",
+      }),
+    ).toEqual(["lat"]);
+  });
+
+  it("says nothing when the geocoder confirms where it already was", () => {
+    expect(changes({ lat: 40.7173, lng: -73.95687, geocode_note: "nominatim" })).toEqual([]);
   });
 });

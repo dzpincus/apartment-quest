@@ -24,9 +24,8 @@ import "server-only";
  * owners.
  */
 
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { cronAuthorized, hasSession } from "@/lib/api-auth";
 import { adminEnabled, createAdminClient } from "@/lib/supabase/admin";
 import { listingLabel } from "@/lib/format";
 import { nowNY } from "@/lib/time";
@@ -379,35 +378,12 @@ function recentlyBlocked(row: Candidate): boolean {
  * (a double-clicked button, a refreshed URL) is not something to leave open.
  */
 async function authorized(request: Request, listingId: string): Promise<boolean> {
-  const header = request.headers.get("authorization") ?? "";
-  const bearer = /^Bearer\s+(.+)$/i.exec(header)?.[1]?.trim();
-  if (bearer && secretMatches(bearer)) return true;
+  // The cron's door, then the person's — and a person may only ask about one
+  // listing, which is the narrowing this route adds on top of the shared pair
+  // in `src/lib/api-auth.ts`.
+  if (cronAuthorized(request)) return true;
   if (!listingId) return false;
-
-  try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    return Boolean(user);
-  } catch {
-    return false;
-  }
-}
-
-/** Constant-time, and false when there is no secret to match at all. */
-function secretMatches(candidate: string): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(secret);
-  // `timingSafeEqual` throws on a length mismatch, which would itself leak the
-  // length; compare `a` with itself instead and return false regardless.
-  if (a.length !== b.length) {
-    timingSafeEqual(a, a);
-    return false;
-  }
-  return timingSafeEqual(a, b);
+  return hasSession();
 }
 
 // -- helpers ------------------------------------------------------------------
