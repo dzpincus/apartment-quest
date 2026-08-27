@@ -102,13 +102,19 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   anonymous off": those are dashboard checkboxes, and `auth.role() =
   'authenticated'` means "any session Supabase will issue" the moment one gets
   un-ticked
+- `supabase/migrations/0012_spotlights.sql` — `spotlights` (RLS pinned to
+  `is_app_user()` like 0011, `set_updated_at` trigger, realtime), the
+  `spotlights_listing` index, and `merge_listings` redefined an eighth time so a
+  spotlight follows the survivor of a merge. A plain `update ... set listing_id`
+  rather than the insert/on-conflict/delete the votes and commute rows need:
+  `person_id` is the whole primary key, so repointing can never collide
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply via the Supabase SQL editor (paste + run) or the Supabase MCP
 `apply_migration` tool, in **this** order:
 
 ```
-0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011
+0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011 → 0012
 ```
 
 Filename order everywhere except the one swap: **0007 (photos) applies before
@@ -119,8 +125,8 @@ number while 0006 was written afterwards against a schema that already had it.
 dark until that row exists). New changes go in a new numbered file; never edit
 an applied one.
 
-`merge_listings` is defined seven times — 0003, 0004, 0005, 0007, 0008 and 0009
-are history, 0010 is the live version.
+`merge_listings` is defined eight times — 0003, 0004, 0005, 0007, 0008, 0009
+and 0010 are history, 0012 is the live version.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -1019,6 +1025,29 @@ important on `bg-inset`.
   shape: same four rows and the same toggles, but a flat section with a top
   divider instead of a Card, because a card inside the header block doubles
   every border.
+- **Spotlights are one per person, and the key says so.** "Look at this one!"
+  (0012) promotes a listing to Home with a reason for the other three to read;
+  `spotlights.person_id` is the primary key, so setting a second one *replaces*
+  the first rather than adding to it, and the dialog says which listing it is
+  about to replace before the button is pressed rather than after. The note caps
+  at 280 characters in the input (`SPOTLIGHT_NOTE_MAX`, not a CHECK constraint —
+  a limit somebody can watch themselves approach belongs in the textarea) and
+  the feed repeats the first 80 of it in curly quotes. Rows ride on the listing
+  row for the fifth time: `LISTING_SELECT` embeds
+  `spotlights(person_id, note, created_at)`, Home's `SpotlightStrip` reads the
+  `["listings"]` entry the queue and the nav badge already hold, and realtime
+  routes a `spotlights` change to `listings` / `listing(id)` — with the *wide*
+  key on a delete, because the primary key is `person_id` alone and "Remove
+  spotlight" therefore arrives with no `listing_id` at all. **A dead listing
+  drops out at read time, not by deleting anything**: `activeSpotlights`
+  (`src/lib/spotlight.ts`, pure and tested) hides merged rows, `passed`/`lost`
+  ones and the bot, so un-passing a listing brings the spotlight and its note
+  straight back — while `mySpotlight` deliberately does *not* filter, since a
+  hidden spotlight still occupies the one slot its owner has. Two verbs,
+  `spotlighted` and `unspotlighted`, both filed against the listing so
+  `activityHref` lands the feed line on it. Not optimistic: a dialog with a Save
+  in it should close when the write lands, which is the opposite of the
+  three-buttons-in-a-row argument that makes votes optimistic.
 - **Time**: store UTC, render New York. Use `fmtNY` / `todayNY` from `src/lib/time.ts`;
   never `new Date().toLocaleString()` and never compare dates in local time.
 - **Mobile-first**: bottom tab bar under `md`, top bar at `md` and up.

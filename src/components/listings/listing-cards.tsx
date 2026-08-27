@@ -12,6 +12,7 @@ import { AmenityMarks, amenityMarks } from "@/components/listings/amenity-marks"
 import { PhotoCarousel } from "@/components/listings/photo-carousel";
 import { PhotoLightbox } from "@/components/listings/photo-lightbox";
 import { GoneBadge } from "@/components/listings/gone-badge";
+import { SpotlightPill } from "@/components/listings/spotlight-pill";
 import { PoweredByGoogle } from "@/components/listings/powered-by-google";
 import { useLocations, useUnread, type ListingRow } from "@/lib/queries";
 import { usePerson } from "@/lib/person";
@@ -132,6 +133,9 @@ export function ListingCards({
                 incomeMultiplier={row.income_multiplier}
                 incomes={incomes}
               />
+              {/* Inert, so it could live inside the <Link> — it sits here so
+                  the row's three marks stay on one line together. */}
+              <SpotlightPill spotlights={row.spotlights} />
               {/* Out of the <Link> above and down here on purpose: the badge is
                   a popover trigger now, and a button inside an anchor is both
                   invalid markup and a tap that navigates instead of opening. */}

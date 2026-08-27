@@ -67,6 +67,14 @@ export type ActivityVerb =
   | "updated_document"
   | "merged_listing"
   | "added_photos"
+  /** "Look at this one!" (0012) — somebody promoted a listing to Home with a
+   *  reason. One per person, so this verb also means the *previous* spotlight
+   *  quietly went away; the feed says what was promoted, not what it replaced. */
+  | "spotlighted"
+  /** The same person took their spotlight down. Its own verb rather than a
+   *  `spotlighted` with different wording, so "who is shouting about what" can
+   *  be read off the verb column alone. */
+  | "unspotlighted"
   /** Written by Quest Bot from `/api/sync` — the listing page moved on. */
   | "listing_state_changed"
   /** Saved places (0010). "added location Work" / "removed location Gym". */
@@ -192,6 +200,28 @@ export type ListingPhoto = {
   sort: number;
   added_by: Uuid | null;
   created_at: Timestamptz | null;
+};
+
+/**
+ * "Look at this one!" (0012) — one listing per person, promoted to Home with a
+ * reason for the other three to read.
+ *
+ * `person_id` is the primary key, so setting a new one *replaces* the old one:
+ * there is no history here and none is wanted, since a spotlight is a thing
+ * being said now rather than a record of what was said.
+ *
+ * A `note` of null is a promotion with nothing typed under it — still a signal,
+ * just without the quote block on the card. Dead listings are not deleted from
+ * this table: `activeSpotlights` (`src/lib/spotlight.ts`) drops merged rows and
+ * `passed`/`lost` ones at read time, so a mis-clicked Passed does not silently
+ * destroy the note.
+ */
+export type Spotlight = {
+  person_id: Uuid;
+  listing_id: Uuid;
+  note: string | null;
+  created_at: Timestamptz;
+  updated_at: Timestamptz;
 };
 
 /**

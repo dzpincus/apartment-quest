@@ -36,6 +36,7 @@ import type {
   GeocodeResponse,
 } from "@/lib/geo-types";
 import { upsertVote, withoutVote } from "@/lib/votes";
+import { spotlightSummary } from "@/lib/spotlight";
 import { fmtDay } from "@/lib/time";
 import type {
   ActivityVerb,
@@ -721,6 +722,73 @@ export async function clearVote(
   });
 }
 
+// -- spotlights (0012) -------------------------------------------------------
+
+/**
+ * "Look at this one!" — promote a listing to Home with a reason, replacing
+ * whatever this person had promoted before.
+ *
+ * The replace is the primary key doing its job: `spotlights.person_id` is the
+ * key, so `on conflict (person_id) do update` moves the one row a person owns
+ * rather than adding a second. `updated_at` is left to the trigger (0012) and
+ * `created_at` to the column default, so the clock stays server-side — which is
+ * what Home orders by.
+ *
+ * An empty or whitespace-only note is stored as null: a spotlight with a note
+ * of `"   "` would print an empty quote block on the card.
+ */
+export async function setSpotlight(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit">,
+  note: string | null,
+): Promise<void> {
+  const trimmed = note?.trim() || null;
+  const { error } = await createClient()
+    .from("spotlights")
+    .upsert(
+      { person_id: personId, listing_id: listing.id, note: trimmed },
+      { onConflict: "person_id" },
+    );
+  if (error) throw error;
+
+  await logActivity({
+    personId,
+    verb: "spotlighted",
+    entityType: "listing",
+    entityId: listing.id,
+    summary: spotlightSummary(
+      "set",
+      listingLabel(listing.address, listing.unit),
+      trimmed,
+    ),
+  });
+}
+
+/**
+ * Take it down. Scoped to the person and not to the listing: one row, one
+ * person, and deleting by `person_id` alone is the same row either way — but
+ * the listing is still what the feed line and the activity entity name, since
+ * "took the spotlight off" is about an apartment.
+ */
+export async function clearSpotlight(
+  personId: Uuid,
+  listing: Pick<Listing, "id" | "address" | "unit">,
+): Promise<void> {
+  const { error } = await createClient()
+    .from("spotlights")
+    .delete()
+    .eq("person_id", personId);
+  if (error) throw error;
+
+  await logActivity({
+    personId,
+    verb: "unspotlighted",
+    entityType: "listing",
+    entityId: listing.id,
+    summary: spotlightSummary("clear", listingLabel(listing.address, listing.unit), null),
+  });
+}
+
 // -- brokers -----------------------------------------------------------------
 
 export async function createBroker(
@@ -1356,6 +1424,31 @@ export function useMutations(personId: Uuid | undefined) {
     onSettled: (_data, _error, listing) => invalidateListings(listing.id),
   });
 
+  /**
+   * "Look at this one!" — not optimistic. The other two write paths that patch
+   * the cache first (`castVote`, `clearVote`) are three buttons in a row that
+   * feel broken if they wait; this one is a dialog with a Save in it, and a
+   * dialog that closes when the write lands is exactly right.
+   */
+  const spotlight = useMutation({
+    mutationFn: (vars: {
+      listing: Pick<Listing, "id" | "address" | "unit">;
+      note: string | null;
+    }) => setSpotlight(requirePerson(), vars.listing, vars.note),
+    // The whole listings cache, not just this row: setting a spotlight moves
+    // the one this person had somewhere *else*, and Home reads both out of the
+    // same entry.
+    onSuccess: (_data, vars) => invalidateListings(vars.listing.id),
+    onError: onError("Could not set the spotlight"),
+  });
+
+  const dropSpotlight = useMutation({
+    mutationFn: (listing: Pick<Listing, "id" | "address" | "unit">) =>
+      clearSpotlight(requirePerson(), listing),
+    onSuccess: (_data, listing) => invalidateListings(listing.id),
+    onError: onError("Could not remove the spotlight"),
+  });
+
   const addBroker = useMutation({
     mutationFn: (input: Omit<NewBroker, "id">) => createBroker(requirePerson(), input),
     onSuccess: () => {
@@ -1660,6 +1753,8 @@ export function useMutations(personId: Uuid | undefined) {
     markThreadRead: readThread,
     castVote: vote,
     clearVote: dropVote,
+    setSpotlight: spotlight,
+    clearSpotlight: dropSpotlight,
     uploadPhotos: addPhotos,
     refreshPhotos: refreshListingPhotos,
     deletePhoto: removePhoto,

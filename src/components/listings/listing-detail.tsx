@@ -20,6 +20,7 @@ import { MergeIntoDialog } from "@/components/listings/merge-into-dialog";
 import { PhotoGallery } from "@/components/listings/photo-gallery";
 import { LinkStatus } from "@/components/listings/link-status";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
+import { SpotlightDialog } from "@/components/listings/spotlight-dialog";
 import { StatusSelect } from "@/components/listings/status-select";
 import { VotesCard } from "@/components/listings/votes-card";
 import {
@@ -178,6 +179,11 @@ function ListingDetailView({
             incomes={incomes}
           />
           <StatusSelect listing={listing} size="default" className="w-40" />
+          {/* "Look at this one!" (0012) — one per person, so this button is
+              also the way to see and edit the one you already set. Not on a
+              merged row: that apartment lives on the survivor now, and a
+              spotlight on a hidden copy would never reach Home. */}
+          {!listing.merged_into && <SpotlightDialog listing={listing} />}
           {/* Only http(s) becomes a link. Rows predating the inline-edit
               validation below can still hold anything, and `href` is the one
               place a stored string turns into executable intent. */}

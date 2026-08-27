@@ -20,6 +20,7 @@ import type {
   Location,
   Message,
   Person,
+  Spotlight,
   UnreadCount,
   Uuid,
   Vote,
@@ -57,6 +58,15 @@ export type PhotoRef = Pick<
  */
 export type CommuteRef = Pick<CommuteTime, "location_id" | "mode" | "seconds" | "error">;
 
+/**
+ * A spotlight as it arrives embedded in a listing (0012). `listing_id` is left
+ * off — it is the row you found it on — and `updated_at` is not selected:
+ * `created_at` is what Home orders by (a re-typed note is not a fresh shout),
+ * and the person is resolved from `usePerson().people` rather than joined again
+ * for at most four rows the client already holds.
+ */
+export type SpotlightRow = Pick<Spotlight, "person_id" | "note" | "created_at">;
+
 /** Broker/person columns joined onto a listing row, plus everyone's votes. */
 export type ListingRow = Listing & {
   broker: Pick<Broker, "id" | "name" | "company" | "phone" | "email" | "notes"> | null;
@@ -65,6 +75,7 @@ export type ListingRow = Listing & {
   votes: VoteRow[];
   photos: PhotoRef[];
   commute_times: CommuteRef[];
+  spotlights: SpotlightRow[];
 };
 
 export type ActivityRow = Activity & { person: PersonRef | null };
@@ -107,6 +118,11 @@ export const EMPTY_UNREAD: UnreadSummary = { global: 0, byListing: {}, total: 0 
  * table's "Transit to ⭐" column, the map's mini card and the detail page's
  * "Getting there" card all want them, and fifteen small rows on a query that
  * already runs is cheaper than one commute query per visible listing.
+ *
+ * Spotlights (0012) are the fourth. Home's strip, the table's pill, the cards'
+ * pill and the detail page's "Look at this one!" button all read them, there
+ * are at most four rows per listing, and the alternative is a whole second
+ * query whose results would have to be joined back onto these rows anyway.
  */
 const LISTING_SELECT = `
   *,
@@ -115,7 +131,8 @@ const LISTING_SELECT = `
   next_action_owner_person:people!next_action_owner(id, name, color),
   votes(person_id, vote, comment, updated_at),
   photos:listing_photos(id, storage_path, thumb_path, width, height, sort),
-  commute_times(location_id, mode, seconds, error)
+  commute_times(location_id, mode, seconds, error),
+  spotlights:spotlights(person_id, note, created_at)
 `;
 
 /**
@@ -152,6 +169,11 @@ export const queryKeys = {
   unread: ["unread"] as const,
   unreadFor: (personId: Uuid) => ["unread", personId] as const,
   /**
+   * Spotlights (0012) have no cache entry of their own either — they ride on
+   * the listing row and Home's strip reads them out of `listings`, the same
+   * entry the table and the queue already hold. Realtime routes a `spotlights`
+   * change to `listings` / `listing(id)`, so there is no key here at all.
+   *
    * Votes have no cache entry of their own — they ride on the listing row and
    * `useVotes` reads them from `listing(id)`. The key stays because realtime
    * invalidates it on any `votes` change; the same handler also invalidates

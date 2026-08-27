@@ -27,6 +27,10 @@ describe("activityHref — listings", () => {
       "merged_listing",
       "added_photos",
       "listing_state_changed",
+      // Spotlights (0012): both verbs are filed against the listing, so both
+      // land on it — "look at this one" has to be one tap from the feed.
+      "spotlighted",
+      "unspotlighted",
     ];
     for (const verb of verbs) {
       expect(activityHref(item({ verb }))).toBe(`/listings/${LISTING}`);
@@ -99,6 +103,21 @@ describe("activityHref — nowhere to go", () => {
   it("does not follow a broker id onto a listing route", () => {
     expect(
       activityHref({ verb: "voted", entity_type: "broker", entity_id: BROKER }),
+    ).toBeNull();
+  });
+});
+
+describe("activityHref — spotlights (0012)", () => {
+  it("points a spotlight at the listing, not at the thread", () => {
+    // The card on Home already carries the note; the feed line's job is to get
+    // somebody to the apartment it is about.
+    expect(activityHref(item({ verb: "spotlighted" }))).toBe(`/listings/${LISTING}`);
+    expect(activityHref(item({ verb: "unspotlighted" }))).toBe(`/listings/${LISTING}`);
+  });
+
+  it("leaves a spotlight row with no entity as plain text", () => {
+    expect(
+      activityHref(item({ verb: "spotlighted", entity_type: null, entity_id: null })),
     ).toBeNull();
   });
 });

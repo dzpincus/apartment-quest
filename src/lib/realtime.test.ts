@@ -202,6 +202,7 @@ describe("keysForChange — contract", () => {
     "listing_photos",
     "locations",
     "commute_times",
+    "spotlights",
   ] as const;
 
   it("returns at least one key for every table in the publication", () => {
@@ -243,6 +244,34 @@ describe("keysForChange — contract", () => {
           expect(roots).toContain((key as string[])[0]);
         }
       }
+    }
+  });
+});
+
+describe("keysForChange — spotlights (0012)", () => {
+  it("routes a spotlight to the listing it is embedded in", () => {
+    // No key of its own: the rows arrive inside `LISTING_SELECT`, exactly like
+    // votes, photos and commute times.
+    expect(
+      keysForChange("spotlights", { person_id: OTHER, listing_id: LISTING }),
+    ).toEqual([queryKeys.listings, queryKeys.listing(LISTING)]);
+  });
+
+  it("falls back to the whole table on a DELETE, which is the common case", () => {
+    // The primary key is `person_id` alone, so "Remove spotlight" arrives with
+    // no listing id at all. Home reads the strip out of `["listings"]`, so the
+    // wide key is the right answer rather than a degraded one.
+    expect(keysForChange("spotlights", { person_id: OTHER })).toEqual([
+      queryKeys.listings,
+    ]);
+  });
+
+  it("never invents a spotlights key", () => {
+    for (const key of keysForChange("spotlights", {
+      person_id: OTHER,
+      listing_id: LISTING,
+    })) {
+      expect((key as string[])[0]).toBe("listings");
     }
   });
 });

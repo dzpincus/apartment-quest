@@ -24,6 +24,7 @@ import { AmenityMarks } from "@/components/listings/amenity-marks";
 import { ListingThumb } from "@/components/listings/listing-thumb";
 import { PhotoLightbox } from "@/components/listings/photo-lightbox";
 import { GoneBadge } from "@/components/listings/gone-badge";
+import { SpotlightPill } from "@/components/listings/spotlight-pill";
 import { useRowEdit } from "@/components/listings/use-row-edit";
 import { useLocations, useUnread, type ListingRow } from "@/lib/queries";
 import {
@@ -220,6 +221,11 @@ function Row({
                 {row.address}
               </Link>
               <UnreadBadge count={unread} />
+              {/* Beside the other two marks, not on its own line: the Address
+                  cell's second line is already the unit plus the Gallery
+                  button. Inert — the note is in the `title` and every action
+                  is on the detail page. */}
+              <SpotlightPill spotlights={row.spotlights} />
               <GoneBadge state={row.listing_state} note={row.state_note} listing={row} />
             </span>
             {/* Unit and the way into the photos share the second line: a

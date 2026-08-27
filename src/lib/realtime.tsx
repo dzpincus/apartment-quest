@@ -41,6 +41,7 @@ const TABLES = [
   "listing_photos",
   "locations",
   "commute_times",
+  "spotlights",
 ] as const;
 type Table = (typeof TABLES)[number];
 
@@ -121,6 +122,22 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
       // A DELETE under the default replica identity carries only the primary
       // key — which here is the whole of (listing_id, location_id, mode), so
       // `listing_id` is present even then and the narrow key still works.
+      const listingId = id(row, "listing_id");
+      return listingId
+        ? [queryKeys.listings, queryKeys.listing(listingId)]
+        : [queryKeys.listings];
+    }
+    case "spotlights": {
+      // Spotlights (0012) are embedded in the listing row too, so they have no
+      // key of their own — same shape as photos and commute times. This is what
+      // puts somebody else's "Look at this one!" on your Home strip without a
+      // refresh, since Home reads it out of the `listings` entry the queue
+      // already holds.
+      //
+      // A DELETE under the default replica identity carries only the primary
+      // key, which here is `person_id` alone — so `listing_id` is absent and the
+      // table-wide key has to do. That is the *common* case for this table
+      // ("Remove spotlight"), not an edge one, and `["listings"]` covers it.
       const listingId = id(row, "listing_id");
       return listingId
         ? [queryKeys.listings, queryKeys.listing(listingId)]
