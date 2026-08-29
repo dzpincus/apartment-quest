@@ -1,12 +1,21 @@
 "use client";
 
 /**
- * Reverse-chronological feed, last ~50, grouped by consecutive runs of the same
- * person in their colour (SPEC). Summaries are pre-rendered at write time, so
- * this is one cheap query and no joins beyond the person.
+ * Reverse-chronological feed, grouped by consecutive runs of the same person in
+ * their colour (SPEC). Summaries are pre-rendered at write time, so this is one
+ * cheap query and no joins beyond the person.
+ *
+ * The body is a scroll panel capped at 60vh rather than a list that grows with
+ * the house's history — Home is the queue first, and a feed that is 400 rows
+ * tall pushes nothing but itself. The first fetch is the latest `PAGE` rows;
+ * "Show older" raises the limit by another page (a bigger `limit` is a new
+ * cache key, and `["activity"]` is a prefix of every one of them, so realtime
+ * still invalidates whatever page is open). The button goes away when a fetch
+ * comes back short: that is the whole timeline.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,16 +40,20 @@ export function groupByRun(rows: readonly ActivityRow[]): Group[] {
   return groups;
 }
 
-export function ActivityFeed({ limit = 50 }: { limit?: number }) {
-  const { data, isPending, error } = useActivity(limit);
+const PAGE = 50;
+
+export function ActivityFeed() {
+  const [limit, setLimit] = useState(PAGE);
+  const { data, isPending, error, isFetching } = useActivity(limit);
   const groups = useMemo(() => groupByRun(data ?? []), [data]);
+  const exhausted = data != null && data.length < limit;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Lately</CardTitle>
       </CardHeader>
-      <CardContent className="grid gap-4">
+      <CardContent className="grid max-h-[60vh] content-start gap-4 overflow-y-auto overscroll-contain">
         {isPending && <Skeleton className="h-24 w-full" />}
         {error && (
           <p className="text-sm text-destructive">
@@ -106,6 +119,18 @@ export function ActivityFeed({ limit = 50 }: { limit?: number }) {
             </ul>
           </div>
         ))}
+
+        {!isPending && !error && groups.length > 0 && !exhausted && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="justify-self-center"
+            disabled={isFetching}
+            onClick={() => setLimit((n) => n + PAGE)}
+          >
+            {isFetching ? "Loading…" : "Show older"}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

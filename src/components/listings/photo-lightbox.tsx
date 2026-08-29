@@ -132,21 +132,29 @@ export function PhotoLightbox({
 
   // Window-level so the keys work wherever focus landed inside the dialog —
   // the close button takes it on open, and a keydown handler on the popup
-  // would then be listening to the wrong element.
+  // would then be listening to the wrong element. **Capture phase**, because
+  // the dialog's own key handling (Base UI's focus trap and the buttons inside
+  // it) sits between the target and the window in the bubbling phase and can
+  // stop an arrow key before it ever gets here — which read as "the arrows do
+  // nothing". Seeing the event first is the fix; the keys have no other job
+  // while the lightbox is open. Home/End jump to the first and last photo.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        step(-1);
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        step(1);
-      }
+      if (event.defaultPrevented) return;
+      let delta: number | null = null;
+      if (event.key === "ArrowLeft") delta = -1;
+      else if (event.key === "ArrowRight") delta = 1;
+      else if (event.key === "Home") delta = -at;
+      else if (event.key === "End") delta = photos.length - 1 - at;
+      if (delta === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      step(delta);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, step]);
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [open, step, at, photos.length]);
 
   if (!current) return null;
 

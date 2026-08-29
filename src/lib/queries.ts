@@ -6,7 +6,7 @@
  * inserts or updates.
  */
 
-import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
+import { useQuery, type UseQueryOptions, keepPreviousData } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { peopleQueryOptions, usePerson } from "@/lib/person";
 import type {
@@ -407,6 +407,10 @@ export function useActivity(limit = 50) {
     queryKey: queryKeys.activityFeed(limit),
     queryFn: () => fetchActivity(limit),
     refetchOnWindowFocus: true,
+    // "Show older" bumps `limit`, which is a new key: without this the feed
+    // would swap to a skeleton and drop its scroll position while the longer
+    // page loads.
+    placeholderData: keepPreviousData,
   });
 }
 
