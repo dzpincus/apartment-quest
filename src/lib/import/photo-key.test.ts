@@ -123,3 +123,23 @@ describe("photoSourceKey — no key at all", () => {
     expect(photoSourceKey("not a url")).toBeNull();
   });
 });
+
+describe("photoSourceKey — craigslist", () => {
+  it("treats the 50px crop thumb as the same picture as the 600 and 1200 renditions", () => {
+    const keys = [
+      "https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_50x50c.jpg",
+      "https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_600x450.jpg",
+      "https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_1200x900.jpg",
+    ].map(photoSourceKey);
+    expect(new Set(keys).size).toBe(1);
+    expect(keys[0]).toBe("images.craigslist.org:00b0b_wneb0s2okd_0ci0t1");
+  });
+
+  it("keeps two craigslist pictures apart", () => {
+    expect(
+      photoSourceKey("https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_600x450.jpg"),
+    ).not.toBe(
+      photoSourceKey("https://images.craigslist.org/00a0a_iRpcJELq2zH_0CI0t1_600x450.jpg"),
+    );
+  });
+});

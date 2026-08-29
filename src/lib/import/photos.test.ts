@@ -214,3 +214,28 @@ describe("largestFromSrcset", () => {
     expect(largestFromSrcset("")).toBeNull();
   });
 });
+
+describe("discoverPhotos — a craigslist-shaped page", () => {
+  // The gallery lists the 600px slide and its 50px `c`rop thumb side by side,
+  // and og:image is the first slide again. Three URLs, two pictures, one of
+  // them twice.
+  const html = `
+    <meta property="og:image" content="https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_600x450.jpg">
+    <div class="slide"><img src="https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_600x450.jpg"></div>
+    <div class="slide"><img src="https://images.craigslist.org/00a0a_iRpcJELq2zH_0CI0t1_600x450.jpg"></div>
+    <div class="thumb"><img src="https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_50x50c.jpg"></div>
+    <div class="thumb"><img src="https://images.craigslist.org/00a0a_iRpcJELq2zH_0CI0t1_50x50c.jpg"></div>
+    <script>var imgList = [{"url":"https://images.craigslist.org/00b0b_WnEb0S2okd_0CI0t1_1200x900.jpg"}];</script>
+  `;
+
+  it("never hands back the 50px crop thumb as a photo of its own", () => {
+    const urls = discoverPhotos(html, "https://newyork.craigslist.org/brk/apa/d/x/1.html");
+    expect(urls.some((u) => /_50x50c\.jpg$/.test(u))).toBe(false);
+    expect(urls).toHaveLength(2);
+  });
+
+  it("prefers the 1200px rendition when the page names one", () => {
+    const urls = discoverPhotos(html, "https://newyork.craigslist.org/brk/apa/d/x/1.html");
+    expect(urls[0]).toMatch(/00b0b_WnEb0S2okd_0CI0t1_1200x900\.jpg$/);
+  });
+});

@@ -397,8 +397,11 @@ function widthHint(parsed: URL): number | null {
     const value = Number(parsed.searchParams.get(key) ?? "");
     if (Number.isFinite(value) && value > 0) return value;
   }
+  // The optional trailing `c` is craigslist's crop marker: `_50x50c.jpg` is
+  // the 50px square thumb of `_600x450.jpg`. Without it the thumb declared no
+  // width at all, sailed past `MIN_WIDTH`, and was saved as a blurry twin.
   const suffix = parsed.pathname.match(
-    /(?:-cc_ft_|uncropped_scaled_within_|[-_])(\d{2,4})(?:[x_]\d{2,4})?\.(?:jpe?g|png|webp|avif|gif)$/i,
+    /(?:-cc_ft_|uncropped_scaled_within_|[-_])(\d{2,4})(?:[x_]\d{2,4}c?)?\.(?:jpe?g|png|webp|avif|gif)$/i,
   );
   return suffix ? Number(suffix[1]) : null;
 }
@@ -415,7 +418,7 @@ function groupKey(parsed: URL): string {
     .toLowerCase()
     .replace(/-cc_ft_\d+/g, "")
     .replace(
-      /[-_](?:small|medium|large|xlarge|thumb|thumbnail|orig|\d{2,4}x\d{2,4}|\d{2,4}w)(?=\.|$)/g,
+      /[-_](?:small|medium|large|xlarge|thumb|thumbnail|orig|\d{2,4}x\d{2,4}c?|\d{2,4}w)(?=\.|$)/g,
       "",
     );
   return `${host}${path}`;

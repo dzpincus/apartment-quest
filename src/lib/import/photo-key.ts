@@ -40,12 +40,16 @@ const ZILLOW_HOST_RE = /(?:^|\.)zillowstatic\.com$/i;
 const ZILLOW_FP_RE =
   /^\/fp\/(.+?)(?:-(?:uncropped_scaled_within_\d+_\d+|cc_ft_\d+|p_[a-z]))?\.(?:jpe?g|png|webp|avif|gif)$/i;
 
-/** Hosts whose renditions differ only in the filename's size suffix. */
-const FILENAME_HOST_RE = /(?:^|\.)(?:streeteasy\.com|cloudfront\.net)$/i;
+/**
+ * Hosts whose renditions differ only in the filename's size suffix.
+ * Craigslist is `<id>_600x450.jpg` / `_1200x900.jpg` / `_50x50c.jpg` — the
+ * `c` is a crop marker, handled below.
+ */
+const FILENAME_HOST_RE = /(?:^|\.)(?:streeteasy\.com|cloudfront\.net|craigslist\.org)$/i;
 
-/** `-large`, `_1024x768`, `-w800`, `-cc_ft_384` — a size, not a picture. */
+/** `-large`, `_1024x768`, `_50x50c`, `-w800`, `-cc_ft_384` — a size, not a picture. */
 const SIZE_SUFFIX_RE =
-  /(?:[-_](?:x?x?large|medium|small|thumb(?:nail)?|tiny|orig(?:inal)?|full)|[-_]\d{2,4}x\d{2,4}|[-_]w\d{2,4}|[-_]cc_ft_\d+)$/i;
+  /(?:[-_](?:x?x?large|medium|small|thumb(?:nail)?|tiny|orig(?:inal)?|full)|[-_]\d{2,4}x\d{2,4}c?|[-_]w\d{2,4}|[-_]cc_ft_\d+)$/i;
 
 const EXTENSION_RE = /\.(?:jpe?g|png|webp|avif|gif)$/i;
 
