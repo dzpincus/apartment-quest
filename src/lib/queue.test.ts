@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  BUCKET_ORDER,
+  BUCKET_TONE,
   bucketListings,
+  bucketOf,
+  bucketTone,
   COLD_AFTER_MS,
   coldFor,
   dayMs,
@@ -670,5 +674,46 @@ describe("bucketListings — shape guarantees", () => {
   it("hands back the same row objects, not copies", () => {
     const row = listing({ id: "a", next_action_due: TODAY });
     expect(bucket([row]).today[0]).toBe(row);
+  });
+});
+
+describe("bucketOf", () => {
+  it("names the bucket a listing landed in", () => {
+    const buckets = bucket([
+      listing({ id: "late", next_action_due: "2025-08-01", next_action: "call" }),
+      listing({ id: "now", next_action_due: TODAY, next_action: "call" }),
+      listing({ id: "gone", listing_state: "off_market" }),
+      listing({ id: "new", created_at: "2025-08-26T12:00:00Z" }),
+    ]);
+    expect(bucketOf(buckets, "late")).toBe("overdue");
+    expect(bucketOf(buckets, "now")).toBe("today");
+    expect(bucketOf(buckets, "gone")).toBe("vanished");
+    expect(bucketOf(buckets, "new")).toBe("fresh");
+  });
+
+  it("is null for a listing in no bucket at all", () => {
+    // Applied, with nothing scheduled: still very much alive, and not on the
+    // queue. The thread header draws it in the resting border colour.
+    const buckets = bucket([listing({ id: "applied", status: "applied" })]);
+    expect(bucketOf(buckets, "applied")).toBeNull();
+    expect(bucketOf(buckets, "nobody")).toBeNull();
+  });
+
+  it("covers every bucket, so a new one cannot be missed", () => {
+    const buckets = bucket([]);
+    expect([...BUCKET_ORDER].sort()).toEqual(Object.keys(buckets).sort());
+  });
+});
+
+describe("bucketTone", () => {
+  it("gives every bucket a colour and no bucket the resting border", () => {
+    for (const b of BUCKET_ORDER) {
+      expect(bucketTone(b)).toBe(BUCKET_TONE[b]);
+      expect(bucketTone(b)).not.toBe(bucketTone(null));
+    }
+  });
+
+  it("falls back to the plain border for a listing in no bucket", () => {
+    expect(bucketTone(null)).toBe("var(--border)");
   });
 });

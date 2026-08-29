@@ -21,6 +21,7 @@ import type {
   Message,
   Person,
   Spotlight,
+  Timestamptz,
   UnreadCount,
   Uuid,
   Vote,
@@ -98,6 +99,24 @@ export type UnreadSummary = {
 export const EMPTY_UNREAD: UnreadSummary = { global: 0, byListing: {}, total: 0 };
 
 /**
+ * One row of the `thread_summaries()` RPC (0013): a thread that has at least
+ * one message, with the last one's words attached. `listing_id === null` is the
+ * group thread, the same convention `messages` and `unread_counts` use.
+ *
+ * The group thread is *not* guaranteed to be in here — a database where nobody
+ * has said anything yet has no rows at all. `buildThreadList`
+ * (`src/lib/threads.ts`) pins it in regardless, which is why the list can never
+ * be empty.
+ */
+export type ThreadSummary = {
+  listing_id: Uuid | null;
+  message_count: number;
+  last_at: Timestamptz | null;
+  last_body: string | null;
+  last_person_id: Uuid | null;
+};
+
+/**
  * `!added_by` / `!next_action_owner` are disambiguating hints: `listings` has
  * two FKs to `people`, so PostgREST needs to be told which one each embed
  * follows. The owner join is on every listing read rather than a queue-only
@@ -165,6 +184,13 @@ export const queryKeys = {
   messages: ["messages"] as const,
   /** One thread. `null` is the global thread, stored under `"global"`. */
   thread: (listingId: Uuid | null) => ["messages", listingId ?? "global"] as const,
+  /**
+   * The `/chat` thread list (0013). Deliberately *not* under `["messages"]`:
+   * that prefix is the message bodies, and invalidating it from here would
+   * refetch every open thread to redraw a snippet. Realtime invalidates both
+   * on a `messages` change, which is the one place they move together.
+   */
+  threads: ["threads"] as const,
   /** Prefix — the badges are per person, but every write invalidates all of it. */
   unread: ["unread"] as const,
   unreadFor: (personId: Uuid) => ["unread", personId] as const,
@@ -292,6 +318,27 @@ export async function fetchMessages(listingId: Uuid | null): Promise<MessageRow[
     .limit(THREAD_LIMIT);
   if (error) throw error;
   return ((data ?? []) as unknown as MessageRow[]).slice().reverse();
+}
+
+/**
+ * Every thread that has been spoken in, newest message first-ish (the real
+ * ordering is `buildThreadList`'s, which pins the group thread). One RPC —
+ * counting messages in the browser would mean fetching all of them.
+ *
+ * `message_count` is a `bigint`, which PostgREST hands back as a string on
+ * some versions, so it goes through `Number` here rather than in four
+ * components.
+ */
+export async function fetchThreadSummaries(): Promise<ThreadSummary[]> {
+  const { data, error } = await createClient().rpc("thread_summaries");
+  if (error) throw error;
+  return ((data ?? []) as ThreadSummary[]).map((row) => ({
+    listing_id: row.listing_id ?? null,
+    message_count: Number(row.message_count) || 0,
+    last_at: row.last_at ?? null,
+    last_body: row.last_body ?? null,
+    last_person_id: row.last_person_id ?? null,
+  }));
 }
 
 /** Unread badges for every thread in one round trip (`unread_counts` RPC). */
@@ -435,6 +482,20 @@ export function useMessages(listingId: Uuid | null) {
   return useQuery({
     queryKey: queryKeys.thread(listingId),
     queryFn: () => fetchMessages(listingId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * The `/chat` thread list. Same freshness posture as `useMessages`: realtime
+ * invalidates it on any `messages` change, and a tab that reconnects re-reads
+ * it rather than showing a snippet from before it went to sleep.
+ */
+export function useThreadSummaries() {
+  return useQuery({
+    queryKey: queryKeys.threads,
+    queryFn: fetchThreadSummaries,
     staleTime: 0,
     refetchOnWindowFocus: true,
   });

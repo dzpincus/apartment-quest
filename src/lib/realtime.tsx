@@ -72,8 +72,15 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
     case "messages":
       // A default replica identity gives DELETE only the primary key; without
       // `listing_id` we cannot tell which thread moved, so refresh them all.
+      //
+      // `threads` (0013) is always in the list: every message changes some
+      // thread's count, its timestamp and its snippet, and /chat's left pane
+      // reads all three. It is a separate key from `messages` on purpose —
+      // invalidating the prefix would refetch every open thread's bodies to
+      // redraw one line of grey text.
       return [
         "listing_id" in row ? queryKeys.thread(id(row, "listing_id")) : queryKeys.messages,
+        queryKeys.threads,
         queryKeys.unread,
       ];
     case "listings": {

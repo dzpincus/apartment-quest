@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Per-device, per-person preferences about the map.
+ * Per-device, per-person preferences: the map's saved places, how the listings
+ * page is shown, and whether this device buzzes for new messages.
  *
  * Saved places are shared data (`locations`, 0010) — one hunt, one list — but
  * *which* of them a given person wants to see, and which one they want in the
@@ -222,4 +223,53 @@ export function useListingsView(): [ListingsView, (view: ListingsView) => void] 
   const view = useSyncExternalStore(subscribe, listingsView, () => "list" as const);
   const set = useCallback((next: ListingsView) => setListingsView(next), []);
   return [view, set];
+}
+
+// -- notifications -----------------------------------------------------------
+
+/**
+ * Whether this device buzzes for new messages, per person.
+ *
+ *   aq.notify:<personId>   "1", or absent
+ *
+ * A device preference and not a column, for the same reason the location
+ * toggles are: the phone in somebody's pocket and the laptop they left at work
+ * are not the same answer to "tell me about this", and nobody should be able to
+ * switch off somebody else's notifications from across the room.
+ *
+ * Separate from the browser's own permission, which is not ours to store: a
+ * granted permission with this off is somebody who said yes once and has since
+ * had enough, and revoking the permission in browser settings leaves this
+ * pointing at nothing, which `notificationPermission()` catches on the way out.
+ */
+export const notifyKey = (personId: Uuid) => `aq.notify:${personId}`;
+
+export function notifyEnabled(personId: Uuid): boolean {
+  return read(notifyKey(personId)) === "1";
+}
+
+export function setNotifyEnabled(personId: Uuid, enabled: boolean): void {
+  write(notifyKey(personId), enabled ? "1" : null);
+}
+
+/**
+ * `[enabled, setEnabled]`, live across tabs. Off on the server and on the first
+ * paint: the toggle is allowed to settle a frame late, and defaulting to "on"
+ * would mean a button that says "Notifying" to somebody who never agreed to it.
+ */
+export function useNotifyEnabled(
+  personId: Uuid | undefined,
+): [boolean, (enabled: boolean) => void] {
+  const getSnapshot = useCallback(
+    () => (personId ? notifyEnabled(personId) : false),
+    [personId],
+  );
+  const enabled = useSyncExternalStore(subscribe, getSnapshot, () => false);
+  const set = useCallback(
+    (next: boolean) => {
+      if (personId) setNotifyEnabled(personId, next);
+    },
+    [personId],
+  );
+  return [enabled, set];
 }

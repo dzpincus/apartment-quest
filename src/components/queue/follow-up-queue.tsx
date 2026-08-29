@@ -24,43 +24,29 @@ import { useCallback, useSyncExternalStore } from "react";
 import { QueueRow } from "@/components/queue/queue-row";
 import { VanishedRow } from "@/components/queue/vanished-row";
 import { useQueue } from "@/components/queue/use-queue";
-import type { QueueBucket } from "@/lib/queue";
+import { BUCKET_TONE, type QueueBucket } from "@/lib/queue";
 import type { ListingRow } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
+/**
+ * The five chips. The colours come from `BUCKET_TONE` (`lib/queue.ts`) rather
+ * than being written here, because the same card is now drawn in a second
+ * place — the thread header on `/chat` — and two lists of five hexes is one
+ * list too many.
+ */
 const BUCKETS: ReadonlyArray<{
   bucket: QueueBucket;
   title: string;
   /** CSS colour token; also the border of the cards in this bucket. */
   tone: string;
 }> = [
-  {
-    bucket: "overdue",
-    title: "Overdue",
-    tone: "var(--urgent)",
-  },
-  {
-    bucket: "today",
-    title: "Today",
-    tone: "var(--due)",
-  },
-  {
-    bucket: "cold",
-    title: "Gone quiet",
-    tone: "var(--quiet)",
-  },
-  {
-    bucket: "vanished",
-    title: "Vanished?",
-    tone: "var(--quiet)",
-  },
-  {
-    // Its own mint, not `--yes` — that one is a person's colour as well as a
-    // vote's, and a bucket must never look like a housemate.
-    bucket: "fresh",
-    title: "New",
-    tone: "var(--fresh)",
-  },
+  { bucket: "overdue", title: "Overdue", tone: BUCKET_TONE.overdue },
+  { bucket: "today", title: "Today", tone: BUCKET_TONE.today },
+  { bucket: "cold", title: "Gone quiet", tone: BUCKET_TONE.cold },
+  { bucket: "vanished", title: "Vanished?", tone: BUCKET_TONE.vanished },
+  // Its own mint, not `--yes` — that one is a person's colour as well as a
+  // vote's, and a bucket must never look like a housemate.
+  { bucket: "fresh", title: "New", tone: BUCKET_TONE.fresh },
 ];
 
 const STORAGE_KEY = "aq.homeBucket";

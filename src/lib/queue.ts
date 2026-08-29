@@ -238,3 +238,57 @@ export function queueSubtitle(count: number): string {
 export function needsAttentionCount<T>(buckets: Buckets<T>): number {
   return buckets.overdue.length + buckets.today.length;
 }
+
+/**
+ * Which bucket a listing landed in, or null for one that landed in none —
+ * applied, toured, passed, lost, or contacted with an action that is not due
+ * yet. `bucketListings` already decided; this only asks it.
+ *
+ * `/chat` needs the answer for a card it draws outside Home: the same queue
+ * card, at the top of a listing's thread, in the colour of whatever it is
+ * doing. Scanning five short arrays is cheaper than a second pass over the
+ * rows, and putting the search here rather than in the component is what keeps
+ * "at most one bucket" a fact with a test on it.
+ */
+export function bucketOf<T extends { id: string }>(
+  buckets: Buckets<T>,
+  listingId: string,
+): QueueBucket | null {
+  for (const bucket of BUCKET_ORDER) {
+    if (buckets[bucket].some((row) => row.id === listingId)) return bucket;
+  }
+  return null;
+}
+
+/** Precedence order, which is also the order Home draws the chips in. */
+export const BUCKET_ORDER: readonly QueueBucket[] = [
+  "overdue",
+  "today",
+  "vanished",
+  "cold",
+  "fresh",
+] as const;
+
+/**
+ * One colour per bucket, used for the chip on Home, the border of every card
+ * under it, and the same card wherever else it is drawn (the thread header on
+ * `/chat`). Semantic tokens only — a bucket must never look like a housemate,
+ * which is why `fresh` is `--fresh` and not `--yes`.
+ *
+ * `null` — a listing in no bucket at all — is the plain border: nothing is
+ * happening to it, and a colour would be a claim.
+ */
+export const BUCKET_TONE: Record<QueueBucket, string> = {
+  overdue: "var(--urgent)",
+  today: "var(--due)",
+  cold: "var(--quiet)",
+  // Neither is on fire, both want a person eventually, so Vanished shares the
+  // quiet blue with Gone quiet.
+  vanished: "var(--quiet)",
+  fresh: "var(--fresh)",
+};
+
+/** The bucket's colour, or the resting border for a listing in none. */
+export function bucketTone(bucket: QueueBucket | null): string {
+  return bucket ? BUCKET_TONE[bucket] : "var(--border)";
+}

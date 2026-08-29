@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   hiddenKey,
   LISTINGS_VIEW_KEY,
+  notifyEnabled,
+  notifyKey,
+  setNotifyEnabled,
   listingsView,
   setListingsView,
   hiddenLocationIds,
@@ -178,5 +181,30 @@ describe("listings view", () => {
     expect(win.__store.has(LISTINGS_VIEW_KEY)).toBe(false);
     win.__store.set(LISTINGS_VIEW_KEY, "globe");
     expect(listingsView()).toBe("list");
+  });
+});
+
+describe("notifications", () => {
+  it("is off until somebody turns it on", () => {
+    expect(notifyEnabled(REESE)).toBe(false);
+  });
+
+  it("turns on and off again", () => {
+    setNotifyEnabled(REESE, true);
+    expect(notifyEnabled(REESE)).toBe(true);
+    setNotifyEnabled(REESE, false);
+    expect(notifyEnabled(REESE)).toBe(false);
+    // Off is an absent key, not a stored "0" — nothing to migrate later.
+    expect(win.__store.has(notifyKey(REESE))).toBe(false);
+  });
+
+  it("is per person on a shared device", () => {
+    setNotifyEnabled(REESE, true);
+    expect(notifyEnabled(DYLAN)).toBe(false);
+  });
+
+  it("reads anything that is not the stored value as off", () => {
+    win.__store.set(notifyKey(REESE), "yes please");
+    expect(notifyEnabled(REESE)).toBe(false);
   });
 });

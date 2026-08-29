@@ -19,6 +19,7 @@ describe("keysForChange — messages", () => {
   it("refreshes one thread and the unread badges", () => {
     expect(keysForChange("messages", { id: "m1", listing_id: LISTING })).toEqual([
       queryKeys.thread(LISTING),
+      queryKeys.threads,
       queryKeys.unread,
     ]);
   });
@@ -26,6 +27,7 @@ describe("keysForChange — messages", () => {
   it("routes a global message to the global thread key", () => {
     expect(keysForChange("messages", { id: "m1", listing_id: null })).toEqual([
       queryKeys.thread(null),
+      queryKeys.threads,
       queryKeys.unread,
     ]);
     expect(keysForChange("messages", { id: "m1", listing_id: null })[0]).toEqual([
@@ -39,6 +41,7 @@ describe("keysForChange — messages", () => {
     // so there is no way to tell which thread moved.
     expect(keysForChange("messages", { id: "m1" })).toEqual([
       queryKeys.messages,
+      queryKeys.threads,
       queryKeys.unread,
     ]);
   });
@@ -48,6 +51,7 @@ describe("keysForChange — messages", () => {
     // thread key resolves to the global thread rather than to garbage.
     expect(keysForChange("messages", { id: "m1", listing_id: 42 })).toEqual([
       queryKeys.thread(null),
+      queryKeys.threads,
       queryKeys.unread,
     ]);
   });
@@ -56,6 +60,21 @@ describe("keysForChange — messages", () => {
     for (const row of [{ id: "m" }, { id: "m", listing_id: LISTING }, { listing_id: null }]) {
       expect(keysForChange("messages", row)).toContainEqual(queryKeys.unread);
     }
+  });
+
+  it("always refreshes the /chat thread list", () => {
+    // Every message moves some thread's count, timestamp and snippet, so the
+    // left pane of /chat is stale whatever else changed — including a DELETE
+    // that arrives with nothing but a primary key.
+    for (const row of [{ id: "m" }, { id: "m", listing_id: LISTING }, { listing_id: null }]) {
+      expect(keysForChange("messages", row)).toContainEqual(queryKeys.threads);
+    }
+  });
+
+  it("keeps the thread list off the messages prefix", () => {
+    // `["threads"]` must not start with `"messages"`, or invalidating the list
+    // would drag every open thread's bodies back with it.
+    expect(queryKeys.threads[0]).not.toBe(queryKeys.messages[0]);
   });
 });
 
@@ -229,6 +248,7 @@ describe("keysForChange — contract", () => {
   it("only ever emits keys the query-key factory could have produced", () => {
     const roots = new Set([
       "messages",
+      "threads",
       "listings",
       "unread",
       "activity",

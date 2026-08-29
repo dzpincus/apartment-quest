@@ -108,13 +108,21 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   spotlight follows the survivor of a merge. A plain `update ... set listing_id`
   rather than the insert/on-conflict/delete the votes and commute rows need:
   `person_id` is the whole primary key, so repointing can never collide
+- `supabase/migrations/0013_thread_summaries.sql` — `thread_summaries()`, one
+  row per thread that has been spoken in (`listing_id` null = the group
+  thread) carrying the count, the last timestamp, the last body and its
+  author. `security invoker` + `stable` like `unread_counts`, so 0011's
+  predicate still decides what comes back, and no explicit grant for the same
+  reason. `distinct on (listing_id)` over a grouped count joined with `is not
+  distinct from` — `=` would drop the group thread's count on the floor, since
+  its key is NULL. No schema change — one function
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply via the Supabase SQL editor (paste + run) or the Supabase MCP
 `apply_migration` tool, in **this** order:
 
 ```
-0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011 → 0012
+0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013
 ```
 
 Filename order everywhere except the one swap: **0007 (photos) applies before
@@ -984,6 +992,30 @@ important on `bg-inset`.
   (only `["unread"]`), which is what keeps an open thread out of a refetch loop.
   `postMessage` marks the thread read for the author. Badges come from the
   `unread_counts` RPC through `useUnread()`, keyed by person.
+- **`/chat` is a list of threads with one of them open**, Slack's shape. The
+  left pane is every conversation that has been spoken in — `thread_summaries()`
+  (0013) joined against the listings the page already holds and the unread
+  summary, by `buildThreadList` (`src/lib/threads.ts`, pure and tested): the
+  group thread is **always present and always first** even at zero messages,
+  listing threads follow newest-first, and a summary naming a merged or
+  unknown listing is dropped rather than drawn as "(unknown)". The right pane
+  is the same `<Thread>` the listing page has always used. **The open thread is
+  the URL** — `?t=<listingId>`, with absent and `global` both meaning the group
+  thread — so a thread is shareable, a refresh survivable, and Back is a real
+  exit. Under `md` only one pane fits and the param decides which: no `t` is
+  the list, a `t` is the thread with a back chevron that `replace`s. That is a
+  media query (`useIsDesktop`) and **not** two CSS-hidden panes, because
+  `<Thread>` marks itself read on mount and a hidden-but-mounted thread would
+  clear a badge for messages nobody saw. Rows push under `md` (so Back comes
+  out of a thread) and replace at `md` and up (so skimming does not stack
+  twenty history entries). Above a listing's messages sits **the queue card** —
+  `QueueRow`, the same component Home draws, tinted by `bucketOf` /
+  `bucketTone` (`lib/queue.ts`, both tested), falling back to `var(--border)`
+  for a listing in no bucket at all. A conversation about an apartment is
+  nearly always about the next thing somebody has to do about it, and "Log
+  contact" belongs where that conversation is. The nav's Chat badge still
+  counts *group* messages only: it is a tab badge, and the listings with
+  something new are already counted on the Listings tab.
 - **Unread is two questions, one RPC.** `unreadSummary(unread)`
   (`src/lib/unread.ts`, pure and tested) turns the summary into
   `{ chatCount, listingIds }`, and everything that badges anything reads it:
@@ -1000,6 +1032,50 @@ important on `bg-inset`.
   — arriving marks it read, since `Thread` does that on mount. A `messages`
   insert invalidates `["unread"]` (see `keysForChange`), which is a prefix of
   `["unread", personId]`, so somebody else posting lights the badge live.
+- **Notifications are Web Notifications, not Web Push.** A new message becomes
+  a banner **only while a tab of this app is open somewhere**: no service
+  worker, no VAPID key pair, no subscription row, nothing to unsubscribe from.
+  Four people who each keep the app in a tab do not need a push service, and a
+  push service needs a server component nobody would maintain. `shouldNotify` /
+  `notificationBody` / `isThreadOnScreen` (`src/lib/notifications.ts`, pure and
+  tested) are the whole decision: not yours, the device preference is on, the
+  permission is `granted`, and **not** (the tab is visible *and* this message's
+  thread is the one on screen) — notifying somebody about a message they are
+  reading is how notifications get switched off for good. A message in another
+  thread still buzzes with the tab in front of you, since the only other sign
+  of it is a small badge in a corner. The tag is `thread:<listingId|global>`,
+  so a burst collapses to one banner per thread, and the click focuses the
+  window and routes to `/chat?t=…`. **The preference is per device and per
+  person** (`aq.notify:<personId>` in `prefs.ts`, the same guarded
+  `useSyncExternalStore` the location toggles use) and is deliberately not the
+  same thing as the browser's permission: somebody who said yes six weeks ago
+  and has since had enough turns off the preference, not the browser, and gets
+  it back with one tap. `NotifyToggle` (in the thread header) says which of the
+  four states it is in — `unsupported` and `denied` are disabled buttons with a
+  sentence, `default` asks and fires one test banner on a yes, `granted`
+  toggles. **`NotificationsProvider` opens its own channel** (`notify`, INSERT
+  on `messages` only), because `RealtimeProvider` is invalidation-only by rule
+  and this needs the row's body, author and thread; two subscriptions ride one
+  websocket, since `createBrowserClient` memoizes per url+key. Everything
+  mutable is read through a ref so a preference change never re-joins the
+  channel, the listing's name comes out of the `["listings"]` cache
+  (`getQueryData`, never a request), and `new Notification` is wrapped in
+  `try/catch` — Chrome on Android throws for one constructed outside a service
+  worker. **iOS needs the app on the Home Screen**: Safari has no
+  `window.Notification` in a tab at all, which is why
+  `public/manifest.webmanifest` and `appleWebApp` in the root layout exist —
+  the manifest is what makes "Add to Home Screen" install rather than bookmark.
+  `icon-192.png` / `icon-512.png` come from `scripts/make-icons.mjs` (a
+  one-off, committed, paths not text — libvips font support is not something to
+  bet an icon on); the iOS icon stays `src/app/apple-icon.tsx`, and there is no
+  `icons.apple` in the metadata because two `rel="apple-touch-icon"` links
+  would leave the choice to tag order. `src/proxy.ts` never sees any of it: its
+  matcher already excludes anything ending `.webmanifest` or `.png`, which is
+  what stops a credentials-less manifest fetch being answered with a redirect
+  to `/login` (verified: `curl -sI /manifest.webmanifest` → 200 signed out,
+  `/chat` → 307). Note that Next 16 emits the standardised
+  `mobile-web-app-capable` meta rather than the `apple-` prefixed one; iOS
+  16.4+, which is the floor for Home Screen notifications anyway, reads it.
 - **Activity rows link where they point.** `activityHref(item)`
   (`src/lib/activity.ts`, pure and tested) is the only place that decides:
   a listing entity -> that listing, `messaged` about a listing -> its
