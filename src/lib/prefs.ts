@@ -273,3 +273,52 @@ export function useNotifyEnabled(
   );
   return [enabled, set];
 }
+
+// -- the Home queue's "Mine" chip --------------------------------------------
+
+/**
+ * Whether Home's follow-up buckets are filtered to this person's own
+ * assignments (0014), per device.
+ *
+ *   aq.queue.mine:<personId>   "1", or absent
+ *
+ * A preference and not a URL parameter, for the same reason list-or-map is:
+ * somebody who works from their own list on Tuesday wants it on Wednesday too,
+ * and four people share one login — a filter in the data would be one person
+ * hiding the other three's work from across the room.
+ *
+ * Per person as well as per device, because the whole meaning of "mine" changes
+ * when somebody else picks up the phone.
+ */
+export const queueMineKey = (personId: Uuid) => `aq.queue.mine:${personId}`;
+
+export function queueMineEnabled(personId: Uuid): boolean {
+  return read(queueMineKey(personId)) === "1";
+}
+
+export function setQueueMineEnabled(personId: Uuid, enabled: boolean): void {
+  write(queueMineKey(personId), enabled ? "1" : null);
+}
+
+/**
+ * `[mine, setMine]`, live across tabs. Off on the server and on the first
+ * paint: the counts on the chips are the whole screen, and drawing the house's
+ * numbers a frame before this settles is better than drawing a filtered set to
+ * somebody who never asked for one.
+ */
+export function useQueueMine(
+  personId: Uuid | undefined,
+): [boolean, (enabled: boolean) => void] {
+  const getSnapshot = useCallback(
+    () => (personId ? queueMineEnabled(personId) : false),
+    [personId],
+  );
+  const mine = useSyncExternalStore(subscribe, getSnapshot, () => false);
+  const set = useCallback(
+    (next: boolean) => {
+      if (personId) setQueueMineEnabled(personId, next);
+    },
+    [personId],
+  );
+  return [mine, set];
+}

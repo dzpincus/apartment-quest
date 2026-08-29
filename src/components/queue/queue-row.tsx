@@ -7,10 +7,12 @@
  */
 
 import Link from "next/link";
-import { PersonDot } from "@/components/person-dot";
+import { PersonDots } from "@/components/person-dots";
 import { GoneBadge } from "@/components/listings/gone-badge";
 import { LogContactDialog } from "@/components/queue/log-contact-dialog";
 import { listingLabel } from "@/lib/format";
+import { usePerson } from "@/lib/person";
+import { ownerIdsOf, ownersOf } from "@/lib/people";
 import { coldFor, dueHint, type QueueBucket } from "@/lib/queue";
 import { fmtDay, fmtNY } from "@/lib/time";
 import type { ListingRow } from "@/lib/queries";
@@ -30,6 +32,12 @@ export function QueueRow({
   today: string;
   now: Date;
 }) {
+  // Names and colours come from the roster the client already holds, not from
+  // the embedded join: `next_action_owner_person` can only ever describe the
+  // first of them (0014).
+  const { people } = usePerson();
+  const owners = ownersOf(ownerIdsOf(row), people);
+
   const hint = row.next_action_due
     ? dueHint(row.next_action_due, today)
     : coldFor(row.last_contacted_at, now);
@@ -81,9 +89,8 @@ export function QueueRow({
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <PersonDot
-          person={row.next_action_owner_person}
-          withName
+        <PersonDots
+          people={owners}
           className="shrink-0 text-xs font-extrabold text-muted-foreground"
         />
         <LogContactDialog listing={row} size="default" />

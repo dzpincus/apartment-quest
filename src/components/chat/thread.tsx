@@ -8,6 +8,12 @@
  *
  * Realtime keeps the query fresh (see `lib/realtime.tsx`); this component only
  * decides where to scroll and when the thread counts as read.
+ *
+ * Reactions (0014) hang under each bubble in their own row inside the
+ * per-message wrapper. They deliberately do not disturb the scroll: the
+ * "follow along" effect below keys on the *last message id*, and a reaction
+ * does not make a new message — so somebody reading the backlog is never
+ * yanked to the bottom because somebody else tapped 🔥.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { PersonDot } from "@/components/person-dot";
+import { MessageReactions } from "@/components/chat/message-reactions";
 import { usePerson } from "@/lib/person";
 import { useListing, useMessages } from "@/lib/queries";
 import { useMutations } from "@/lib/mutations";
@@ -150,18 +157,23 @@ export function Thread({
             return (
               <div key={group.key} className="flex flex-col items-end gap-1">
                 {group.items.map((message) => (
-                  <p
+                  <div
                     key={message.id}
-                    title={
-                      message.created_at
-                        ? fmtNY(message.created_at, "MMM d, h:mm a")
-                        : undefined
-                    }
-                    className="w-fit max-w-[85%] rounded-[18px] rounded-br-[4px] px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap text-ink"
-                    style={{ backgroundColor: color }}
+                    className="group/message flex w-full flex-col items-end gap-1"
                   >
-                    {message.body}
-                  </p>
+                    <p
+                      title={
+                        message.created_at
+                          ? fmtNY(message.created_at, "MMM d, h:mm a")
+                          : undefined
+                      }
+                      className="w-fit max-w-[85%] rounded-[18px] rounded-br-[4px] px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap text-ink"
+                      style={{ backgroundColor: color }}
+                    >
+                      {message.body}
+                    </p>
+                    <MessageReactions message={message} align="end" />
+                  </div>
                 ))}
                 <span className="pr-1 text-[10px] tabular-nums text-faint">
                   {group.startedAt ? fmtNY(group.startedAt, "MMM d, h:mm a") : ""}
@@ -178,18 +190,20 @@ export function Thread({
                   {first.person?.name ?? "Someone"}
                 </span>
                 {group.items.map((message) => (
-                  <p
-                    key={message.id}
-                    title={
-                      message.created_at
-                        ? fmtNY(message.created_at, "MMM d, h:mm a")
-                        : undefined
-                    }
-                    className="w-fit max-w-[85%] rounded-[18px] rounded-bl-[4px] border-2 bg-card px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap"
-                    style={{ borderColor: color }}
-                  >
-                    {message.body}
-                  </p>
+                  <div key={message.id} className="group/message flex flex-col gap-1">
+                    <p
+                      title={
+                        message.created_at
+                          ? fmtNY(message.created_at, "MMM d, h:mm a")
+                          : undefined
+                      }
+                      className="w-fit max-w-[85%] rounded-[18px] rounded-bl-[4px] border-2 bg-card px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap"
+                      style={{ borderColor: color }}
+                    >
+                      {message.body}
+                    </p>
+                    <MessageReactions message={message} />
+                  </div>
                 ))}
                 <span className="text-[10px] tabular-nums text-faint">
                   {group.startedAt ? fmtNY(group.startedAt, "MMM d, h:mm a") : ""}

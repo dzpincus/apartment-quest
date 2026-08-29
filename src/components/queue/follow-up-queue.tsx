@@ -18,13 +18,22 @@
  * blue with Gone quiet: neither is on fire, both want a person eventually. It
  * sits before New, which is last, because neither is a deadline — and for the
  * same reason neither is in the nav badge.
+ *
+ * A sixth chip, **Mine**, is not a bucket: it filters all five to the listings
+ * this person is named on (`next_action_owners`, 0014) and is a device
+ * preference (`aq.queue.mine:<personId>`), so switching it on cannot hide
+ * anybody else's work from them. It wears the person's own colour rather than a
+ * semantic token, because that is exactly what it means. The nav badge is
+ * deliberately left unfiltered — a deadline belongs to the house.
  */
 
 import { useCallback, useSyncExternalStore } from "react";
 import { QueueRow } from "@/components/queue/queue-row";
 import { VanishedRow } from "@/components/queue/vanished-row";
 import { useQueue } from "@/components/queue/use-queue";
-import { BUCKET_TONE, type QueueBucket } from "@/lib/queue";
+import { usePerson } from "@/lib/person";
+import { useQueueMine } from "@/lib/prefs";
+import { BUCKET_TONE, filterMine, type QueueBucket } from "@/lib/queue";
 import type { ListingRow } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -108,8 +117,14 @@ function select(bucket: QueueBucket | null) {
 }
 
 export function FollowUpQueue() {
-  const { buckets, today, now, isPending, error } = useQueue();
+  const { buckets: all, today, now, isPending, error } = useQueue();
   const open = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const { person } = usePerson();
+  const [mine, setMine] = useQueueMine(person?.id);
+
+  // Every count on screen is read off this, so the chips can never disagree
+  // with the rows under them.
+  const buckets = mine ? filterMine(all, person?.id) : all;
 
   const toggle = useCallback(
     (bucket: QueueBucket) => select(getSnapshot() === bucket ? null : bucket),
@@ -152,6 +167,33 @@ export function FollowUpQueue() {
             </button>
           );
         })}
+
+        {person && (
+          <button
+            type="button"
+            aria-pressed={mine}
+            onClick={() => setMine(!mine)}
+            title={
+              mine
+                ? "Showing only what you're on"
+                : "Show only the follow-ups you're on"
+            }
+            className={cn(
+              "cursor-pointer rounded-full border-2 px-2.5 py-1 text-xs font-black tracking-wide uppercase transition-colors",
+              mine ? "text-ink" : "bg-transparent",
+            )}
+            style={
+              mine
+                ? {
+                    backgroundColor: person.color ?? "#888",
+                    borderColor: person.color ?? "#888",
+                  }
+                : { borderColor: person.color ?? "#888", color: person.color ?? "#888" }
+            }
+          >
+            Mine
+          </button>
+        )}
       </div>
 
       {/* Nothing below the chips while the counts are still dashes, and
@@ -176,7 +218,9 @@ export function FollowUpQueue() {
             )}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Nothing here.</p>
+          <p className="text-sm text-muted-foreground">
+            {mine ? "Nothing here with your name on it." : "Nothing here."}
+          </p>
         ))}
     </div>
   );

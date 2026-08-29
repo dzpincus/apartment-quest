@@ -19,6 +19,7 @@ import type {
   ListingPhoto,
   Location,
   Message,
+  MessageReaction,
   Person,
   Spotlight,
   Timestamptz,
@@ -83,7 +84,24 @@ export type ActivityRow = Activity & { person: PersonRef | null };
 
 export type InteractionRow = Interaction & { person: PersonRef | null };
 
-export type MessageRow = Message & { person: PersonRef | null };
+/**
+ * A reaction as it arrives embedded in a message (0014). `message_id` is left
+ * off — it is the row you found it on — and `created_at` is not selected:
+ * nothing on screen shows when somebody reacted, and this array rides along on
+ * every thread read. The person is resolved from `usePerson().people` rather
+ * than joined again for at most four rows the client already holds.
+ */
+export type ReactionRow = Pick<MessageReaction, "person_id" | "emoji">;
+
+/**
+ * Reactions ride on the message row for the same reason votes ride on the
+ * listing row: every bubble wants them, there are at most a couple of dozen per
+ * thread, and the alternative is a second query keyed by message id.
+ */
+export type MessageRow = Message & {
+  person: PersonRef | null;
+  reactions: ReactionRow[];
+};
 
 /**
  * `unread_counts` flattened for the badges: the global thread, a per-listing
@@ -310,14 +328,19 @@ export async function fetchInteractions(listingId: Uuid): Promise<InteractionRow
 export async function fetchMessages(listingId: Uuid | null): Promise<MessageRow[]> {
   const base = createClient()
     .from("messages")
-    .select("*, person:people!person_id(id, name, color)");
+    .select(
+      "*, person:people!person_id(id, name, color), reactions:message_reactions(person_id, emoji)",
+    );
   const scoped =
     listingId === null ? base.is("listing_id", null) : base.eq("listing_id", listingId);
   const { data, error } = await scoped
     .order("created_at", { ascending: false })
     .limit(THREAD_LIMIT);
   if (error) throw error;
-  return ((data ?? []) as unknown as MessageRow[]).slice().reverse();
+  return ((data ?? []) as unknown as MessageRow[])
+    .slice()
+    .reverse()
+    .map((row) => ({ ...row, reactions: row.reactions ?? [] }));
 }
 
 /**

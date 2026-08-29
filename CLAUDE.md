@@ -116,13 +116,27 @@ SQL lives in `supabase/`, applied by hand (no CLI link, no local stack):
   reason. `distinct on (listing_id)` over a grouped count joined with `is not
   distinct from` — `=` would drop the group thread's count on the floor, since
   its key is NULL. No schema change — one function
+- `supabase/migrations/0014_reactions_owners.sql` — two features in one file.
+  `message_reactions` (the whole row is the primary key, so a toggle is an
+  insert or a delete with no read in between; RLS pinned to `is_app_user()`,
+  realtime) — and **no merge change is needed for it**, because
+  `merge_listings` repoints `messages` and a reaction hangs off a message *id*,
+  which a merge never changes. Then `listings.next_action_owners uuid[] not
+  null default '{}'` with a backfill from `next_action_owner`, which is
+  deliberately **kept**: the array is the truth and the scalar mirrors
+  `next_action_owners[1]`, because `LISTING_SELECT` embeds the owner's name and
+  colour through that foreign key and an array has none to embed through. And
+  `merge_listings` redefined a **ninth** time — the owners treated like `pets`
+  (an empty set is an absence), with the scalar derived from the *same*
+  expression rather than a separate `coalesce`, so a merge cannot be the one
+  place the two disagree
 - `supabase/seed.sql` — the four people (idempotent)
 
 Apply via the Supabase SQL editor (paste + run) or the Supabase MCP
 `apply_migration` tool, in **this** order:
 
 ```
-0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013
+0001 → 0002 → 0003 → 0004 → 0005 → 0007 → 0006 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 → 0014
 ```
 
 Filename order everywhere except the one swap: **0007 (photos) applies before
@@ -133,8 +147,8 @@ number while 0006 was written afterwards against a schema that already had it.
 dark until that row exists). New changes go in a new numbered file; never edit
 an applied one.
 
-`merge_listings` is defined eight times — 0003, 0004, 0005, 0007, 0008, 0009
-and 0010 are history, 0012 is the live version.
+`merge_listings` is defined nine times — 0003, 0004, 0005, 0007, 0008, 0009,
+0010 and 0012 are history, **0014 is the live version**.
 `CREATE OR REPLACE` rewrites a function's configuration too, so any redefinition
 must restate `set search_path = public`.
 
@@ -951,6 +965,40 @@ important on `bg-inset`.
   nulls the follow-up triple so dead listings leave the queue. Home and the nav
   badge share one cache entry (`useQueueListings` reuses `queryKeys.listings`),
   so the badge costs no extra request.
+- **A follow-up can belong to more than one person** (0014). "Call the broker
+  and both of us go and look at it" is the normal case, and before this it had
+  to be typed into the action text. `listings.next_action_owners uuid[]` is the
+  **truth**; `next_action_owner` stays as a mirror of `next_action_owners[0]`,
+  written by the same statement — because `LISTING_SELECT` embeds the owner's
+  name and colour through that foreign key and an array has none to embed
+  through, and because a tab left open across the deploy still writes the
+  scalar. Every *read* goes through `ownerIdsOf` / `ownersOf`
+  (`src/lib/people.ts`, both tested), which resolve ids against the roster
+  `usePerson()` already holds: an id naming nobody is skipped rather than drawn
+  as a grey blank, a duplicate yields one person, and `ownerIdsOf` falls back
+  to the scalar — not as insurance about the data, but because the SQL here is
+  applied by hand and there is a window where this code is deployed and the
+  column is not. `merge_listings` treats an empty set as an absence, the same
+  `case` arm `pets` gets, and derives the scalar from that same expression.
+  `setNextAction` takes `ownerIds` and writes both columns; the four
+  "no follow-up" paths (`NO_NEXT_ACTION`, shared by passed/lost and Clear)
+  empty the array as well as null the triple, or a dead listing would keep
+  somebody's name on an action that no longer exists. The feed line lists the
+  names or says `(unassigned)` — rendered at insert time, so it is a snapshot
+  and does not follow a later rename. On screen: `NextActionForm`'s Owner
+  select became a row of **toggle chips**, one per human, labelled
+  "Who's on it", defaulting to whoever is filling it in, with zero allowed and
+  said out loud ("Nobody yet — this one is the house's"); every place a single
+  owner dot used to render draws `PersonDots` instead — one owner is still the
+  dot and the name, two or more overlap into a stack (`-ml-1.5`, the group
+  thread's trick) with the names in the `title`. Home's chip row gains a
+  **Mine** toggle in the person's own colour — `filterMine` (`lib/queue.ts`,
+  pure and tested) over all five buckets, membership read from the array so the
+  second name on a job counts, persisted per device and per person
+  (`aq.queue.mine:<personId>` in `prefs.ts`). It is deliberately **not** wired
+  into the nav `DueBadge`: a deadline belongs to the house, and a badge that
+  goes quiet because somebody put their own name on nothing is a badge that
+  lies.
 - **The next-action prompt is not skippable.** Step 2 of `LogContactDialog` has
   no close button, ignores Escape and outside clicks (controlled `open` +
   `disablePointerDismissal`, same trick as the person gate). The only exits are
@@ -992,6 +1040,39 @@ important on `bg-inset`.
   (only `["unread"]`), which is what keeps an open thread out of a refetch loop.
   `postMessage` marks the thread read for the author. Badges come from the
   `unread_counts` RPC through `useUnread()`, keyed by person.
+- **Reactions are a read receipt with a face on it** (0014), which is why they
+  write **no activity row**: SPEC's rule is "log impressions, not
+  observations", and four thumbs on one message would push the thing somebody
+  actually *did* off the bottom of the feed. `message_reactions` has the whole
+  row as its primary key — one person, one emoji, one message — so a toggle is
+  an insert or a delete with no read in between, and the insert is an upsert
+  that ignores duplicates, which makes a double tap on a flaky connection
+  idempotent rather than a 409 somebody has to read. They ride on the message
+  row (`fetchMessages` embeds `reactions:message_reactions(person_id, emoji)`)
+  for the fifth time the same argument has been made: every bubble wants them,
+  there are a couple of dozen per thread, and the alternative is a second query
+  keyed by message id. The write is the app's **third** optimistic one, for the
+  votes reason — a chip that waits for a round trip feels broken, and this is a
+  chat, where everything else is instant: `onMutate` patches
+  `queryKeys.thread(listing_id)` through `toggleReactionPatch`, `onError` puts
+  the snapshot back, `onSettled` invalidates that one thread. The pure half
+  (`REACTION_EMOJI` — six, not a picker; `groupReactions`, palette order first
+  then anything older by first appearance; `toggleReactionPatch`, which hands
+  back the *same* array when the message is not in this thread) lives in
+  `src/lib/reactions.ts` with tests. Realtime routes a `message_reactions`
+  change to the whole `["messages"]` **prefix**: the row carries no
+  `listing_id` and there is no cheap way to get one, and refetching a dozen
+  small thread entries is cheaper than a denormalised column that goes stale on
+  a merge. Not `["threads"]` — a face does not change /chat's count, timestamp
+  or snippet. On screen the chips sit under each bubble inside the same
+  per-message wrapper (`MessageReactions`, `border-primary bg-primary/15` for
+  your own), with a `SmilePlus` button that is faint-but-there on touch and
+  hover-revealed at `md`; your own bubbles are reactable too, because there is
+  no per-person boundary anywhere in this app. The scroll logic is untouched:
+  the "follow along" effect keys on the last *message id*, and a reaction does
+  not make a new message, so nobody reading the backlog is yanked to the bottom
+  because somebody tapped 🔥. `merge_listings` needed no change — reactions
+  hang off a message id, and a merge repoints messages, not their ids.
 - **`/chat` is a list of threads with one of them open**, Slack's shape. The
   left pane is every conversation that has been spoken in — `thread_summaries()`
   (0013) joined against the listings the page already holds and the unread

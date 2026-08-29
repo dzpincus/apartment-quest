@@ -159,6 +159,18 @@ export type Listing = {
   next_action_due: DateOnly | null;
   next_action_owner: Uuid | null;
   /**
+   * Who is on it (0014). The array is the truth; `next_action_owner` above is
+   * a mirror of `next_action_owners[0]`, kept because `LISTING_SELECT` embeds
+   * the owner's name and colour through that foreign key and an array has no
+   * foreign key to embed through. Every write sets both.
+   *
+   * NOT NULL with a `'{}'` default in the database, so "nobody yet" is an empty
+   * array. Null is only ever the shape of a row read by a client older than
+   * this migration, which is why the type still admits it at the edge — every
+   * read resolves `next_action_owners ?? []`.
+   */
+  next_action_owners: Uuid[];
+  /**
    * Where the building is (0010). Written by `POST /api/geocode` and by
    * drag-to-correct on the detail map; nulled by a trigger the moment
    * `address` or `unit` changes, because a pin is an answer about an address.
@@ -285,6 +297,21 @@ export type Message = {
   person_id: Uuid;
   body: string;
   created_at: Timestamptz | null;
+};
+
+/**
+ * One face on one message (0014). The whole row is the primary key — one
+ * person, one emoji, one message — which is what makes a toggle an insert or a
+ * delete with no read in between.
+ *
+ * A reaction writes no `activity` row. It is a read receipt with a face on it,
+ * not an impression, and four of them per message would drown the feed.
+ */
+export type MessageReaction = {
+  message_id: Uuid;
+  person_id: Uuid;
+  emoji: string;
+  created_at: Timestamptz;
 };
 
 export type ThreadRead = {

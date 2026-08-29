@@ -21,7 +21,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { queryKeys, type ListingRow, type VoteRow } from "@/lib/queries";
+import {
+  queryKeys,
+  type ListingRow,
+  type MessageRow,
+  type VoteRow,
+} from "@/lib/queries";
 import { resizeImage, webpName } from "@/lib/images";
 import {
   BATCH_TOO_BIG_MESSAGE,
@@ -36,6 +41,8 @@ import type {
   GeocodeResponse,
 } from "@/lib/geo-types";
 import { upsertVote, withoutVote } from "@/lib/votes";
+import { toggleReactionPatch } from "@/lib/reactions";
+import { ownerNames } from "@/lib/people";
 import { spotlightSummary } from "@/lib/spotlight";
 import { fmtDay } from "@/lib/time";
 import type {
@@ -75,6 +82,7 @@ const NOISY_COLUMNS = new Set<string>([
   "next_action",
   "next_action_due",
   "next_action_owner",
+  "next_action_owners",
   // The sync columns (0006) are written by a robot twice a day and by the
   // "Still live" button. Their news is the `listing_state_changed` line the
   // sync writes itself; an "edited (link status)" row on top of it would be
@@ -244,11 +252,19 @@ export async function updateListing(
   return listing;
 }
 
-/** Nulls the whole follow-up triple. Shared by "passed/lost" and Clear. */
+/**
+ * Empties the whole follow-up plan. Shared by "passed/lost" and Clear.
+ *
+ * Four columns since 0014, not three: `next_action_owners` is the truth and
+ * `next_action_owner` its mirror, so clearing one without the other would leave
+ * a listing with nobody on an action that no longer exists — and the Mine chip
+ * on Home would keep offering it.
+ */
 const NO_NEXT_ACTION = {
   next_action: null,
   next_action_due: null,
   next_action_owner: null,
+  next_action_owners: [] as Uuid[],
 } as const;
 
 export async function setListingStatus(
@@ -446,9 +462,17 @@ export async function logInteraction(
 }
 
 /**
- * The forced follow-up. `ownerName` is passed in rather than looked up because
- * the summary is rendered at insert time and must survive later renames of
- * nothing at all — it is a snapshot of what was decided.
+ * The forced follow-up.
+ *
+ * `ownerIds` is a set, not a person: "call the broker and both of us go and
+ * look at it" is the normal case, and before 0014 it had to be typed into the
+ * action text. The array is what the app reads; `next_action_owner` is written
+ * in the same statement as `ownerIds[0]`, because `LISTING_SELECT` still embeds
+ * the owner's name and colour through that foreign key and an array has none.
+ *
+ * `owners` (the names) is passed in rather than looked up because the summary
+ * is rendered at insert time: it is a snapshot of what was decided, and it must
+ * not change meaning when somebody renames themselves later.
  */
 export async function setNextAction(
   personId: Uuid,
@@ -456,30 +480,33 @@ export async function setNextAction(
   input: {
     nextAction: string;
     dueDate: DateOnly;
-    ownerId: Uuid | null;
-    ownerName?: string | null;
+    ownerIds: readonly Uuid[];
+    /** Names in the same order, for the feed line. */
+    owners?: readonly string[];
   },
 ): Promise<Listing> {
   const nextAction = input.nextAction.trim();
+  const ownerIds = [...input.ownerIds];
   const { data, error } = await createClient()
     .from("listings")
     .update({
       next_action: nextAction,
       next_action_due: input.dueDate,
-      next_action_owner: input.ownerId,
+      next_action_owners: ownerIds,
+      // The mirror, written by the same statement so the two cannot drift.
+      next_action_owner: ownerIds[0] ?? null,
     })
     .eq("id", listing.id)
     .select("*")
     .single();
   if (error) throw error;
 
-  const who = input.ownerName ? `, ${input.ownerName}` : "";
   await logActivity({
     personId,
     verb: "set_next_action",
     entityType: "listing",
     entityId: listing.id,
-    summary: `set next action on ${listingLabel(listing.address, listing.unit)}: ${nextAction} (due ${fmtDay(input.dueDate)}${who})`,
+    summary: `set next action on ${listingLabel(listing.address, listing.unit)}: ${nextAction} (due ${fmtDay(input.dueDate)}, ${ownerNames(input.owners)})`,
   });
   return data as Listing;
 }
@@ -591,6 +618,54 @@ export async function postMessage(
   }
 
   return message;
+}
+
+// -- reactions ---------------------------------------------------------------
+
+export type ToggleReactionInput = {
+  /** `listing_id` is only used to find the thread's cache entry. */
+  message: Pick<Message, "id" | "listing_id">;
+  emoji: string;
+  /** Does this person already hold it? Decides insert vs delete. */
+  currently: boolean;
+};
+
+/**
+ * Put a face on a message, or take it off again.
+ *
+ * **No activity row, on purpose.** A reaction is a read receipt with a face on
+ * it, not an impression — SPEC's rule is "log impressions, not observations",
+ * and four thumbs on one message would push the thing somebody actually did off
+ * the bottom of the feed.
+ *
+ * The insert is an upsert that ignores duplicates rather than a plain insert:
+ * the whole row is the primary key (0014), so a double tap on a flaky
+ * connection is idempotent instead of a 409 the person has to read.
+ */
+export async function toggleReaction(
+  personId: Uuid,
+  message: Pick<Message, "id" | "listing_id">,
+  emoji: string,
+  currently: boolean,
+): Promise<void> {
+  const supabase = createClient();
+  if (currently) {
+    const { error } = await supabase
+      .from("message_reactions")
+      .delete()
+      .eq("message_id", message.id)
+      .eq("person_id", personId)
+      .eq("emoji", emoji);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase
+    .from("message_reactions")
+    .upsert(
+      { message_id: message.id, person_id: personId, emoji },
+      { onConflict: "message_id,person_id,emoji", ignoreDuplicates: true },
+    );
+  if (error) throw error;
 }
 
 // -- votes -------------------------------------------------------------------
@@ -1303,8 +1378,8 @@ export function useMutations(personId: Uuid | undefined) {
       listing: Pick<Listing, "id" | "address" | "unit">;
       nextAction: string;
       dueDate: DateOnly;
-      ownerId: Uuid | null;
-      ownerName?: string | null;
+      ownerIds: readonly Uuid[];
+      owners?: readonly string[];
     }) => setNextAction(requirePerson(), vars.listing, vars),
     onSuccess: (listing) => invalidateListings(listing.id),
     onError: onError("Could not save the next action"),
@@ -1422,6 +1497,42 @@ export function useMutations(personId: Uuid | undefined) {
       onError("Could not clear your vote")(error);
     },
     onSettled: (_data, _error, listing) => invalidateListings(listing.id),
+  });
+
+  /**
+   * Reactions are optimistic for the same reason votes are: a chip that waits
+   * for a round trip before it fills in feels broken, and this one is tapped in
+   * a chat, where every other thing on screen is instant.
+   *
+   * One cache entry, not two — a message lives in exactly one thread — so the
+   * snapshot is the thread's array and the rollback puts it straight back.
+   */
+  const react = useMutation<void, unknown, ToggleReactionInput, MessageRow[] | undefined>({
+    mutationFn: (input) =>
+      toggleReaction(requirePerson(), input.message, input.emoji, input.currently),
+    onMutate: async (input) => {
+      if (!personId) return undefined;
+      const key = queryKeys.thread(input.message.listing_id);
+      await qc.cancelQueries({ queryKey: key });
+      const snapshot = qc.getQueryData<MessageRow[]>(key);
+      // An updater that returns `undefined` is a no-op in React Query, which is
+      // what should happen for a thread nobody has loaded.
+      qc.setQueryData<MessageRow[]>(key, (rows) =>
+        rows
+          ? toggleReactionPatch(rows, input.message.id, personId, input.emoji)
+          : rows,
+      );
+      return snapshot;
+    },
+    onError: (error, input, snapshot) => {
+      if (snapshot !== undefined) {
+        qc.setQueryData(queryKeys.thread(input.message.listing_id), snapshot);
+      }
+      onError("Could not save your reaction")(error);
+    },
+    onSettled: (_data, _error, input) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.thread(input.message.listing_id) });
+    },
   });
 
   /**
@@ -1753,6 +1864,7 @@ export function useMutations(personId: Uuid | undefined) {
     markThreadRead: readThread,
     castVote: vote,
     clearVote: dropVote,
+    toggleReaction: react,
     setSpotlight: spotlight,
     clearSpotlight: dropSpotlight,
     uploadPhotos: addPhotos,

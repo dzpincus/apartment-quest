@@ -42,6 +42,7 @@ const TABLES = [
   "locations",
   "commute_times",
   "spotlights",
+  "message_reactions",
 ] as const;
 type Table = (typeof TABLES)[number];
 
@@ -88,6 +89,22 @@ export function keysForChange(table: Table, row: Row): QueryKey[] {
       return listingId
         ? [queryKeys.listings, queryKeys.listing(listingId)]
         : [queryKeys.listings];
+    }
+    case "message_reactions": {
+      // Reactions (0014) are embedded in the message row (`fetchMessages`), so
+      // they have no key of their own — same shape as votes on a listing.
+      //
+      // The row carries no `listing_id`, and there is no cheap way to get one:
+      // it hangs off a message id, and adding the column just to route an
+      // invalidation would be a denormalisation that can go stale on a merge.
+      // So the whole `["messages"]` prefix goes. There are at most a dozen
+      // thread cache entries, only the mounted one refetches immediately, and
+      // this is a refetch of a couple of dozen small rows — cheaper than the
+      // column.
+      //
+      // Not `threads`: a face does not change a thread's count, its timestamp
+      // or its snippet, which is all the left pane of /chat draws.
+      return [queryKeys.messages];
     }
     case "activity":
       return [queryKeys.activity];

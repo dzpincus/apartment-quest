@@ -9,17 +9,19 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PersonDot } from "@/components/person-dot";
+import { PersonDots } from "@/components/person-dots";
 import { NextActionForm } from "@/components/queue/next-action-form";
 import { usePerson } from "@/lib/person";
 import { useMutations } from "@/lib/mutations";
+import { ownerIdsOf, ownersOf } from "@/lib/people";
 import { dueHint } from "@/lib/queue";
 import { fmtDay, fmtNY, todayNY } from "@/lib/time";
 import type { ListingRow } from "@/lib/queries";
 
 export function NextActionCard({ listing }: { listing: ListingRow }) {
-  const { person } = usePerson();
+  const { person, people } = usePerson();
   const { clearNextAction } = useMutations(person?.id);
+  const owners = ownersOf(ownerIdsOf(listing), people);
   const [editing, setEditing] = useState(false);
   const today = todayNY();
 
@@ -68,7 +70,7 @@ export function NextActionCard({ listing }: { listing: ListingRow }) {
             initial={{
               nextAction: listing.next_action,
               dueDate: listing.next_action_due,
-              ownerId: listing.next_action_owner,
+              ownerIds: ownerIdsOf(listing),
             }}
             onSaved={() => setEditing(false)}
           >
@@ -93,9 +95,7 @@ export function NextActionCard({ listing }: { listing: ListingRow }) {
                   </span>
                 </span>
               )}
-              {listing.next_action_owner_person && (
-                <PersonDot person={listing.next_action_owner_person} withName />
-              )}
+              {owners.length > 0 && <PersonDots people={owners} />}
               <span>
                 Last contacted{" "}
                 {listing.last_contacted_at

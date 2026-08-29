@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { InlineEdit, toNumberOrNull, toTextOrNull } from "@/components/inline-edit";
 import { PersonDot } from "@/components/person-dot";
+import { PersonDots } from "@/components/person-dots";
 import { UnreadBadge } from "@/components/unread-badge";
 import { QualifyBadge } from "@/components/listings/qualify-badge";
 import { StatusSelect } from "@/components/listings/status-select";
@@ -34,6 +35,7 @@ import {
   type SortKey,
 } from "@/lib/listing-filters";
 import { usePerson } from "@/lib/person";
+import { ownerIdsOf, ownersOf } from "@/lib/people";
 import { usePrimaryLocationId } from "@/lib/prefs";
 import { commuteMinutes } from "@/lib/geo-types";
 import { prefetchPhotos } from "@/lib/photos-client";
@@ -193,6 +195,11 @@ function Row({
 }) {
   const save = useRowEdit(row);
   const photos = row.photos?.length ?? 0;
+  // Who is on the next action (0014). Resolved from the roster the client
+  // already holds — the embedded `next_action_owner_person` can only ever
+  // describe the first of them.
+  const { people } = usePerson();
+  const owners = ownersOf(ownerIdsOf(row), people);
 
   return (
     // 3px left rail in the colour of whoever found it — the desktop version of
@@ -364,11 +371,13 @@ function Row({
         {row.next_action ? (
           <span className="flex flex-col">
             <span className="truncate">{row.next_action}</span>
-            {row.next_action_due && (
-              <span className="text-xs text-muted-foreground">
-                due {fmtDay(row.next_action_due)}
-              </span>
-            )}
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {row.next_action_due && <span>due {fmtDay(row.next_action_due)}</span>}
+              {/* Who is on it (0014), as dots only — the column is 10rem wide
+                  and a name would take the due date's place. `empty={null}`
+                  because an unassigned action is not an em dash. */}
+              <PersonDots people={owners} empty={null} />
+            </span>
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>

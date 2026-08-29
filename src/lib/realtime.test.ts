@@ -222,6 +222,7 @@ describe("keysForChange — contract", () => {
     "locations",
     "commute_times",
     "spotlights",
+    "message_reactions",
   ] as const;
 
   it("returns at least one key for every table in the publication", () => {
@@ -265,6 +266,34 @@ describe("keysForChange — contract", () => {
         }
       }
     }
+  });
+});
+
+describe("keysForChange — message_reactions (0014)", () => {
+  it("refreshes every thread: a reaction row carries no listing_id", () => {
+    expect(
+      keysForChange("message_reactions", {
+        message_id: "m1",
+        person_id: OTHER,
+        emoji: "\u{1F44D}",
+      }),
+    ).toEqual([queryKeys.messages]);
+  });
+
+  it("says the same thing for a DELETE, which carries the same key columns", () => {
+    expect(
+      keysForChange("message_reactions", { message_id: "m1", person_id: OTHER, emoji: "\u{1F525}" }),
+    ).toEqual([queryKeys.messages]);
+    expect(keysForChange("message_reactions", {})).toEqual([queryKeys.messages]);
+  });
+
+  it("never touches the thread list: a face is not a snippet", () => {
+    // /chat's left pane draws a count, a timestamp and the last body. None of
+    // those move when somebody reacts, and refetching them would be a query per
+    // tap for a line of grey text that cannot have changed.
+    const keys = keysForChange("message_reactions", { message_id: "m1" });
+    expect(keys).not.toContainEqual(queryKeys.threads);
+    expect(keys).not.toContainEqual(queryKeys.unread);
   });
 });
 

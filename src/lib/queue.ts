@@ -24,6 +24,7 @@
  * silence than "nobody has called".
  */
 
+import { ownerIdsOf } from "@/lib/people";
 import type { DateOnly, ListingState, ListingStatus, Timestamptz, Uuid } from "@/lib/types";
 
 const DAY_MS = 86_400_000;
@@ -258,6 +259,46 @@ export function bucketOf<T extends { id: string }>(
     if (buckets[bucket].some((row) => row.id === listingId)) return bucket;
   }
   return null;
+}
+
+/** The columns "Mine" reads. Anything wider (a `ListingRow`) satisfies it. */
+export type OwnedFields = {
+  /** 0014, and the truth. Null is the shape of a row read before it applied. */
+  next_action_owners?: readonly Uuid[] | null;
+  /** The mirror, read only when the array is missing — see `ownerIdsOf`. */
+  next_action_owner?: Uuid | null;
+};
+
+/**
+ * The same five buckets, holding only what this person is on the hook for.
+ *
+ * A device preference, not a filter on the data (`aq.queue.mine:<personId>` in
+ * `prefs.ts`): four people share one login and one cache, and "show me mine"
+ * must not change what the other three see. It is also deliberately *not*
+ * wired into `needsAttentionCount` — the nav badge counts the house's
+ * deadlines, and a badge that goes quiet because somebody put their own name
+ * on nothing is a badge that lies.
+ *
+ * Membership is the array, never the scalar mirror: `next_action_owner` is only
+ * `next_action_owners[0]`, so reading it would hide every listing where
+ * somebody is the second name on the job.
+ *
+ * A null person is everybody's queue — the same object back, by identity, so a
+ * memo above this cannot be invalidated by asking.
+ */
+export function filterMine<T extends OwnedFields>(
+  buckets: Buckets<T>,
+  personId: Uuid | null | undefined,
+): Buckets<T> {
+  if (!personId) return buckets;
+  const mine = (row: T) => ownerIdsOf(row).includes(personId);
+  return {
+    overdue: buckets.overdue.filter(mine),
+    today: buckets.today.filter(mine),
+    vanished: buckets.vanished.filter(mine),
+    cold: buckets.cold.filter(mine),
+    fresh: buckets.fresh.filter(mine),
+  };
 }
 
 /** Precedence order, which is also the order Home draws the chips in. */

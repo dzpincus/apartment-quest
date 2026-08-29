@@ -10,6 +10,7 @@ import {
   dayMs,
   daysBetween,
   dueHint,
+  filterMine,
   isVanished,
   needsAttentionCount,
   type QueueFields,
@@ -38,7 +39,9 @@ function ids(rows: ReadonlyArray<{ id: string }>) {
   return rows.map((r) => r.id);
 }
 
-function bucket(rows: ReadonlyArray<QueueFields & { id: string }>) {
+// Generic, so a fixture carrying extra columns (the 0014 owners, say) keeps
+// them through the buckets instead of being widened away to `QueueFields`.
+function bucket<T extends QueueFields & { id: string }>(rows: readonly T[]) {
   return bucketListings(rows, { todayNY: TODAY, now: NOW });
 }
 
@@ -715,5 +718,59 @@ describe("bucketTone", () => {
 
   it("falls back to the plain border for a listing in no bucket", () => {
     expect(bucketTone(null)).toBe("var(--border)");
+  });
+});
+
+describe("filterMine — the Home queue's Mine chip (0014)", () => {
+  const ME = "me";
+  const YOU = "you";
+
+  const owned = (id: string, owners: string[] | null) => ({
+    ...listing({ id, next_action_due: TODAY, next_action: "Call back" }),
+    next_action_owners: owners,
+  });
+
+  it("keeps only the listings this person is on", () => {
+    const buckets = bucket([owned("mine", [ME]), owned("theirs", [YOU])]);
+    expect(ids(filterMine(buckets, ME).today)).toEqual(["mine"]);
+  });
+
+  it("counts the second name on the job, not just the first", () => {
+    // `next_action_owner` is only element one; reading the mirror would hide
+    // every listing where somebody is not the lead.
+    const buckets = bucket([owned("both", [YOU, ME])]);
+    expect(ids(filterMine(buckets, ME).today)).toEqual(["both"]);
+  });
+
+  it("drops an unassigned listing and a pre-0014 row alike", () => {
+    const buckets = bucket([owned("nobody", []), owned("legacy", null)]);
+    expect(ids(filterMine(buckets, ME).today)).toEqual([]);
+  });
+
+  it("filters every bucket, not just the dated ones", () => {
+    const buckets = bucket([
+      { ...listing({ id: "overdue", next_action_due: "2025-08-01", next_action: "x" }), next_action_owners: [ME] },
+      { ...listing({ id: "gone", listing_state: "removed" }), next_action_owners: [ME] },
+      { ...listing({ id: "gone-theirs", listing_state: "removed" }), next_action_owners: [YOU] },
+      { ...listing({ id: "new" }), next_action_owners: [ME] },
+      { ...listing({ id: "new-theirs" }), next_action_owners: [] },
+    ]);
+    const mine = filterMine(buckets, ME);
+    expect(ids(mine.overdue)).toEqual(["overdue"]);
+    expect(ids(mine.vanished)).toEqual(["gone"]);
+    expect(ids(mine.fresh)).toEqual(["new"]);
+  });
+
+  it("hands the same object back for no person at all", () => {
+    // Identity, so a memo above this is not invalidated by asking.
+    const buckets = bucket([owned("mine", [ME])]);
+    expect(filterMine(buckets, null)).toBe(buckets);
+    expect(filterMine(buckets, undefined)).toBe(buckets);
+  });
+
+  it("never mutates the buckets it was given", () => {
+    const buckets = bucket([owned("mine", [ME]), owned("theirs", [YOU])]);
+    filterMine(buckets, ME);
+    expect(ids(buckets.today).sort()).toEqual(["mine", "theirs"]);
   });
 });

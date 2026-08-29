@@ -8,13 +8,16 @@
  */
 
 import { useState } from "react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { SimpleSelect, type SelectOption } from "@/components/simple-select";
+import { PersonDot } from "@/components/person-dot";
 import { usePerson } from "@/lib/person";
 import { useMutations } from "@/lib/mutations";
+import { ownersOf } from "@/lib/people";
 import { tomorrowNY } from "@/lib/time";
+import { cn } from "@/lib/utils";
 import type { Listing, Uuid } from "@/lib/types";
 
 export type NextActionTarget = Pick<Listing, "id" | "address" | "unit">;
@@ -36,8 +39,17 @@ export function NextActionForm({
   children,
 }: {
   listing: NextActionTarget;
-  /** Prefill for "edit the existing plan"; omitted for "decide a new one". */
-  initial?: { nextAction?: string | null; dueDate?: string | null; ownerId?: Uuid | null };
+  /**
+   * Prefill for "edit the existing plan"; omitted for "decide a new one".
+   * `ownerIds` present-but-empty is a plan somebody deliberately left
+   * unassigned, and stays that way — only an *absent* `initial` defaults to the
+   * person holding the phone.
+   */
+  initial?: {
+    nextAction?: string | null;
+    dueDate?: string | null;
+    ownerIds?: readonly Uuid[] | null;
+  };
   submitLabel?: string;
   autoFocus?: boolean;
   onSaved?: () => void;
@@ -49,11 +61,17 @@ export function NextActionForm({
 
   const [text, setText] = useState(initial?.nextAction ?? "");
   const [due, setDue] = useState(initial?.dueDate ?? tomorrowNY());
-  const [ownerId, setOwnerId] = useState<Uuid | null>(
-    initial?.ownerId ?? person?.id ?? null,
+  // "Whoever is filling this in" is the right default and always was; what
+  // changed in 0014 is that it is a starting point rather than the only answer.
+  const [ownerIds, setOwnerIds] = useState<Uuid[]>(() =>
+    initial?.ownerIds ? [...initial.ownerIds] : person ? [person.id] : [],
   );
 
-  const ownerOptions: SelectOption[] = people.map((p) => ({ value: p.id, label: p.name }));
+  const toggleOwner = (id: Uuid) =>
+    setOwnerIds((current) =>
+      current.includes(id) ? current.filter((o) => o !== id) : [...current, id],
+    );
+
   const canSave = text.trim().length > 0 && Boolean(due) && !setNextAction.isPending;
 
   async function submit(event: React.FormEvent) {
@@ -64,8 +82,10 @@ export function NextActionForm({
         listing,
         nextAction: text,
         dueDate: due,
-        ownerId,
-        ownerName: people.find((p) => p.id === ownerId)?.name ?? null,
+        ownerIds,
+        // Names rather than ids, because the feed line is rendered at insert
+        // time and is a snapshot of what was decided.
+        owners: ownersOf(ownerIds, people).map((p) => p.name),
       });
     } catch {
       // Toasted by `onError`. `onSaved` closes the un-skippable prompt, so it
@@ -102,28 +122,63 @@ export function NextActionForm({
         </div>
       </Field>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field>
-          <FieldLabel htmlFor="next-action-due">Due</FieldLabel>
-          <Input
-            id="next-action-due"
-            type="date"
-            required
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel>Owner</FieldLabel>
-          <SimpleSelect
-            aria-label="Owner"
-            value={ownerId}
-            options={ownerOptions}
-            placeholder="Nobody yet"
-            onValueChange={setOwnerId}
-          />
-        </Field>
-      </div>
+      <Field>
+        <FieldLabel htmlFor="next-action-due">Due</FieldLabel>
+        <Input
+          id="next-action-due"
+          type="date"
+          required
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          className="sm:max-w-52"
+        />
+      </Field>
+
+      {/* Chips rather than a multi-select: four people is a row, and "both of
+          us are going" should be one extra tap and not a keyboard modifier.
+          Zero is allowed — an unassigned action is still an action somebody
+          wrote down — and says so instead of looking broken. */}
+      <Field>
+        <FieldLabel>Who&rsquo;s on it</FieldLabel>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Who's on it">
+          {people.map((p) => {
+            const on = ownerIds.includes(p.id);
+            const color = p.color ?? "#888";
+            return (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggleOwner(p.id)}
+                className={cn(
+                  "inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border-2 px-3 text-xs font-extrabold transition-colors",
+                  on ? "text-ink" : "bg-transparent",
+                )}
+                style={
+                  on
+                    ? { backgroundColor: color, borderColor: color }
+                    : { borderColor: color, color }
+                }
+              >
+                {on ? (
+                  <Check className="size-3.5" aria-hidden />
+                ) : (
+                  <PersonDot
+                    person={p}
+                    letter={p.name.slice(0, 1).toUpperCase()}
+                    size="sm"
+                    className="border-0"
+                  />
+                )}
+                {p.name}
+              </button>
+            );
+          })}
+        </div>
+        {ownerIds.length === 0 && (
+          <p className="text-xs text-faint">Nobody yet — this one is the house&rsquo;s.</p>
+        )}
+      </Field>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {children}

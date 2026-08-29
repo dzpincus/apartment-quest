@@ -60,6 +60,7 @@ const BASE: Listing = {
   next_action: null,
   next_action_due: null,
   next_action_owner: null,
+  next_action_owners: [],
   lat: 40.7173,
   lng: -73.95687,
   geocoded_at: "2025-08-01T00:00:05Z",
@@ -103,6 +104,7 @@ describe("meaningfulChanges — noisy columns", () => {
     "next_action",
     "next_action_due",
     "next_action_owner",
+    "next_action_owners",
   ] as const;
 
   /** The sync columns (0006): a robot's twice-daily look is not an edit. */
